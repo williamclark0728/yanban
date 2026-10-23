@@ -38,9 +38,13 @@ export function systemPrompt(agent: Agent) {
     agent.role.io && `输入输出：${agent.role.io}`,
   ].filter(Boolean) as string[];
   if (agent.memory.length) lines.push("", "关于用户你已经知道：", ...agent.memory.map((m) => `- ${m}`));
-  lines.push("", "用用户的语言回答，回答直接、具体。");
+  lines.push("", `现在是${now()}。`, "用用户的语言回答，回答直接、具体。");
   return lines.join("\n");
 }
+
+/** Models don't know today's date; without this they guess from their training data. */
+const now = () =>
+  new Date().toLocaleString("zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "long", hour: "2-digit", minute: "2-digit", hour12: false });
 
 export function groupSystem(agent: Agent, group: Group) {
   const others = group.memberIds.map(agentById).filter((a): a is Agent => !!a && a.id !== agent.id);
