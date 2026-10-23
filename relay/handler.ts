@@ -11,7 +11,7 @@ const DROP_REQUEST = [
 ];
 const DROP_RESPONSE = ["content-encoding", "content-length", "transfer-encoding", "set-cookie", "connection"];
 
-const json = (status: number, message: string) =>
+export const json = (status: number, message: string) =>
   new Response(JSON.stringify({ error: { message } }), {
     status,
     headers: { "content-type": "application/json; charset=utf-8" },
@@ -29,7 +29,7 @@ function isPrivateHost(host: string) {
 }
 
 /** Browsers mark cross-site calls; only this site's own pages may use the relay. */
-function fromOtherSite(request: Request) {
+export function fromOtherSite(request: Request) {
   const site = request.headers.get("sec-fetch-site");
   if (site && site !== "same-origin" && site !== "none") return true;
   const origin = request.headers.get("origin");

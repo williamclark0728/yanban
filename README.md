@@ -48,6 +48,23 @@ npm run dev
 
 `functions/` 目录会自动部署为 Pages Functions。部署完成后在“自定义域”里绑定域名。
 
+### 体验模型（可选）
+
+让新用户不填 Key 也能先聊几句。接口是 `/api/trial`（`relay/trial.ts`），对前端表现为一个 OpenAI Chat 兼容的服务；每个访客每天限定次数，按 IP 哈希计数，不保存原始 IP。在 Pages 项目的 设置 → 绑定 / 变量和机密 里配置：
+
+| 名称 | 类型 | 作用 |
+| --- | --- | --- |
+| `DB` | D1 数据库 | 记录每个访客当天的次数，**必需**（没有它体验模型不开启） |
+| `AI` | Workers AI | 用 Cloudflare 账号的免费额度调用模型，不需要 Key |
+| `TRIAL_API_KEY` | 密钥 | 可选。填了就优先用这个服务（默认智谱 GLM-4.7-Flash），失败时退回 Workers AI |
+| `TRIAL_BASE_URL`、`TRIAL_MODEL` | 文本 | 可选，换成别的 OpenAI 兼容服务和模型 |
+| `TRIAL_AI_MODEL` | 文本 | 可选，Workers AI 模型，默认 `@cf/qwen/qwen3-30b-a3b-fp8` |
+| `TRIAL_DAILY` | 文本 | 可选，每个访客每天的次数，默认 30 |
+
+改完绑定或变量后要重新部署一次才生效。用户连接了自己的模型服务后，智能体会自动改用它。
+
+本机调试：在 `.env.local` 里写 `TRIAL_API_KEY=mock`、`TRIAL_BASE_URL=http://127.0.0.1:5199/v1`、`TRIAL_MODEL=mock-chat`，再运行 `node scripts/mock-llm.mjs` 和 `npm run dev`。
+
 ## 目录
 
 ```
@@ -65,7 +82,8 @@ src/
     export.ts            协作记录导出
   components/            界面组件
 relay/handler.ts         请求转发
-functions/api/relay.ts   Cloudflare Pages Function 入口
+relay/trial.ts           体验模型：后端选择、访客限额、Workers AI 输出转换
+functions/api/           Cloudflare Pages Function 入口（relay、trial）
 scripts/                 文案检查、本机模拟模型服务
 ```
 

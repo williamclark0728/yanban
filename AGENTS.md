@@ -17,11 +17,12 @@
 - `src/lib/files.ts`：附件读取；`src/lib/export.ts`：记录导出
 - `src/store.ts`：Zustand store，所有写操作都同步写入 IndexedDB；`resolveModel` 决定每个智能体实际用哪个模型
 - `relay/handler.ts`：开发环境和 Cloudflare 共用的转发逻辑
+- `relay/trial.ts`：体验模型（`/api/trial`）。服务器端持有额度，按访客每天限次；前端把它当成 id 为 `trial` 的服务，排在用户自己的服务之后，不存进数据库
 
 ## 约定
 
 - 界面文案只写操作、结果、状态。不写免责声明式的话（“仅代表”“不等于”“仅供参考”等），`check:copy` 会拦截。
-- 不在代码、测试数据、文档里出现真实 API Key。Key 只存在用户浏览器的 IndexedDB 里。
+- 不在代码、测试数据、文档里出现真实 API Key。用户的 Key 只存在其浏览器的 IndexedDB 里；体验模型的 Key 只放在 Cloudflare 的机密变量里，不下发到浏览器。
 - 新功能先考虑能不能在三个平台都用：网页版和安卓版只有聊天模式，本地文件和命令只能放在 Windows 桌面版的工作模式里。
 - 模型返回 JSON 的地方（分工、审查）都要能容错：去掉代码块和 `<think>`，读不出来时按最保守的方式处理（审查读不出来记为存疑，不算通过）。
 - 群聊上下文从本次任务的用户消息开始完整保留（`sinceId`），之前的只带最近 N 条。

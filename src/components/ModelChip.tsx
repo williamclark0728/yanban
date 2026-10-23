@@ -1,17 +1,18 @@
 import clsx from "clsx";
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";
-import { resolveModel, useData } from "../store";
+import { resolveModel, TRIAL_ID, useData } from "../store";
 import type { Agent } from "../types";
 import { ModelList } from "./ModelPicker";
 
 /** Composer button showing the agent's model; opens a list to switch it for this agent only. */
 export function ModelChip({ agent }: { agent: Agent }) {
-  const { providers, defaultModel, updateAgent } = useData();
+  const { providers, defaultModel, updateAgent, trial } = useData();
   const [open, setOpen] = useState(false);
   const target = resolveModel(agent, providers, defaultModel);
   const fallback = resolveModel(undefined, providers, defaultModel);
   if (!target) return null;
+  const shown = target.provider.id === TRIAL_ID && trial ? `体验模型 · 剩 ${trial.remaining} 次` : target.modelId;
 
   return (
     <div className="relative hidden shrink-0 self-center sm:block">
@@ -24,7 +25,7 @@ export function ModelChip({ agent }: { agent: Agent }) {
           open && "bg-active text-fg",
         )}
       >
-        <span className="truncate">{target.modelId}</span>
+        <span className="truncate">{shown}</span>
         <ChevronDown size={14} className="shrink-0" />
       </button>
       {open && (

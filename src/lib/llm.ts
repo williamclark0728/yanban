@@ -3,12 +3,17 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { APICallError, RetryError, generateText, streamText, type ModelMessage } from "ai";
+import { useData } from "../store";
 import type { ModelParams, Provider } from "../types";
 
 const RELAY = "/api/relay";
 
-/** Local and plain-http endpoints (Ollama, LAN gateways) are called directly; everything else goes through the relay. */
+/**
+ * Local and plain-http endpoints (Ollama, LAN gateways) and this site's own API (the trial model)
+ * are called directly; everything else goes through the relay.
+ */
 export function isDirect(baseUrl: string) {
+  if (baseUrl.startsWith("/")) return true;
   try {
     const u = new URL(baseUrl);
     return u.protocol === "http:" || ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
@@ -18,6 +23,15 @@ export function isDirect(baseUrl: string) {
 }
 
 function fetchFor(p: Pick<Provider, "baseUrl">): typeof fetch {
+  if (p.baseUrl.startsWith("/api/trial")) {
+    return async (input, init) => {
+      const res = await fetch(input, init);
+      const left = res.headers.get("x-trial-remaining");
+      if (left !== null) useData.getState().setTrialRemaining(Number(left));
+      else if (res.status === 429) useData.getState().setTrialRemaining(0);
+      return res;
+    };
+  }
   if (isDirect(p.baseUrl)) return (input, init) => fetch(input, init);
   return (input, init) => {
     const url = input instanceof Request ? input.url : String(input);
@@ -28,10 +42,12 @@ function fetchFor(p: Pick<Provider, "baseUrl">): typeof fetch {
 }
 
 const trimSlash = (s: string) => s.trim().replace(/\/+$/, "");
+/** The SDKs need absolute URLs; this site's own API is stored as a path. */
+const absolute = (s: string) => (s.startsWith("/") ? new URL(s, location.origin).href : s);
 
 export function languageModel(p: Provider, modelId: string) {
   const fetch = fetchFor(p);
-  const baseURL = trimSlash(p.baseUrl);
+  const baseURL = absolute(trimSlash(p.baseUrl));
   const apiKey = p.apiKey || "none";
   switch (p.protocol) {
     case "openai-chat":
@@ -131,6 +147,8 @@ export function describeError(e: unknown): { message: string; detail?: string } 
   const detail = [status ? `HTTP ${status}` : "", raw || (err as Error)?.message].filter(Boolean).join(" · ");
 
   if ((err as Error)?.name === "AbortError") return { message: "已停止" };
+  // The trial endpoint already words its errors for the user.
+  if (raw.startsWith("体验")) return { message: raw, detail };
   if (status === 401 || status === 403 || /api.?key.{0,20}(invalid|not valid)/i.test(raw)) return { message: "API Key 无效或没有权限", detail };
   if (status === 404) return { message: "找不到这个模型或接口地址", detail };
   if (status === 429) return { message: "请求太频繁，或账户额度不足", detail };

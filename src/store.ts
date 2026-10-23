@@ -82,7 +82,11 @@ interface Data {
   providers: Provider[];
   defaultModel: ModelRef | null;
   unread: Record<string, number>;
+  /** The site's free trial model, when the server offers one. */
+  trial: Trial | null;
   load: () => Promise<void>;
+  refreshTrial: () => Promise<void>;
+  setTrialRemaining: (remaining: number) => void;
   restoreExamples: () => Promise<void>;
   saveProvider: (p: Provider) => Promise<void>;
   removeProvider: (id: string) => Promise<void>;
@@ -104,9 +108,30 @@ interface Data {
   markRead: (chat: string) => void;
 }
 
+export const TRIAL_ID = "trial";
+export interface Trial {
+  model: string;
+  limit: number;
+  remaining: number;
+}
+
+/** Never saved: it exists only while the server says the trial is on. */
+const trialProvider = (t: Trial): Provider => ({
+  id: TRIAL_ID,
+  name: "体验模型",
+  protocol: "openai-chat",
+  baseUrl: "/api/trial/v1",
+  apiKey: "",
+  models: [t.model],
+  enabled: true,
+  custom: false,
+  keyless: true,
+});
+
 const presetOrder = new Map(presets.map((p, i) => [p.id, i]));
-const sortProviders = (list: Provider[]) =>
-  [...list].sort((a, b) => (presetOrder.get(a.id) ?? 999) - (presetOrder.get(b.id) ?? 999));
+// The trial sorts last, so any service the user connects is picked before it.
+const rank = (p: Provider) => (p.id === TRIAL_ID ? 10_000 : (presetOrder.get(p.id) ?? 999));
+const sortProviders = (list: Provider[]) => [...list].sort((a, b) => rank(a) - rank(b));
 
 export const useData = create<Data>()((set, get) => ({
   loaded: false,
@@ -117,6 +142,7 @@ export const useData = create<Data>()((set, get) => ({
   providers: [],
   defaultModel: null,
   unread: {},
+  trial: null,
 
   load: async () => {
     await ensureSeeded();
@@ -130,8 +156,27 @@ export const useData = create<Data>()((set, get) => ({
     ]);
     // A reply that was streaming when the page closed ends as stopped.
     const fixed = messages.map((m) => (m.kind === "text" && m.status === "streaming" ? { ...m, status: "stopped" as const } : m));
-    set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(providers), defaultModel });
+    const trial = get().trial;
+    set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(trial ? [...providers, trialProvider(trial)] : providers), defaultModel });
+    void get().refreshTrial();
   },
+
+  refreshTrial: async () => {
+    let trial: Trial | null = null;
+    try {
+      const res = await fetch("/api/trial/status");
+      const s = res.ok ? await res.json() : null;
+      if (s?.enabled) trial = { model: s.model, limit: s.limit, remaining: s.remaining };
+    } catch {
+      /* no trial on this host */
+    }
+    set((s) => {
+      const rest = s.providers.filter((p) => p.id !== TRIAL_ID);
+      return { trial, providers: sortProviders(trial ? [...rest, trialProvider(trial)] : rest) };
+    });
+  },
+
+  setTrialRemaining: (remaining) => set((s) => (s.trial ? { trial: { ...s.trial, remaining } } : {})),
 
   restoreExamples: async () => {
     await addExamples();

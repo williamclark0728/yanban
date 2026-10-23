@@ -1,9 +1,9 @@
 import clsx from "clsx";
-import { CheckCircle2, ChevronLeft, ExternalLink, Eye, EyeOff, Loader2, Plus, Server, SlidersHorizontal, X, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ExternalLink, Eye, EyeOff, Loader2, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { protocols } from "../lib/catalog";
 import { describeError, listModels, testProvider } from "../lib/llm";
-import { isReady, resolveModel, useData, usePrefs, useUi, type SettingsTab } from "../store";
+import { isReady, resolveModel, TRIAL_ID, useData, usePrefs, useUi, type SettingsTab } from "../store";
 import type { Provider } from "../types";
 import { seedAgents, seedGroups } from "../lib/seed";
 import { MeAvatar } from "./Avatar";
@@ -155,7 +155,7 @@ function General() {
 }
 
 function Providers() {
-  const { providers, defaultModel, setDefaultModel } = useData();
+  const { providers, defaultModel, setDefaultModel, trial } = useData();
   const { editProvider, setEditProvider } = useUi();
 
   if (editProvider) {
@@ -163,11 +163,29 @@ function Providers() {
     return <ProviderForm key={editProvider} provider={current} onClose={() => setEditProvider(null)} />;
   }
 
-  const ready = providers.filter(isReady);
-  const rest = providers.filter((p) => !isReady(p));
+  const own = providers.filter((p) => p.id !== TRIAL_ID);
+  const ready = own.filter(isReady);
+  const rest = own.filter((p) => !isReady(p));
   const fallback = resolveModel(undefined, providers, defaultModel);
   return (
     <div className="space-y-6">
+      {trial && (
+        <div>
+          <div className="mb-2 px-1 text-[13px] font-medium text-fg-3">体验模型</div>
+          <div className="flex items-center gap-3 rounded-2xl border border-line bg-raise px-4 py-3">
+            <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent-text">
+              <Sparkles size={18} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-mono text-[14px] font-medium">{trial.model}</div>
+              <div className="text-[13px] text-fg-3">
+                免费使用，每天 {trial.limit} 次，今天还剩 {trial.remaining} 次
+              </div>
+            </div>
+          </div>
+          <p className="mt-1.5 px-1 text-[13px] text-fg-3">连接下面任一服务后，智能体自动改用你的模型</p>
+        </div>
+      )}
       {ready.length > 0 && (
         <div>
           <div className="mb-2 px-1 text-[13px] font-medium text-fg-3">默认模型</div>
