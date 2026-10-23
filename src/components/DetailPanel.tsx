@@ -6,7 +6,8 @@ import type { Agent, Group } from "../types";
 import { BotAvatar, GroupAvatar } from "./Avatar";
 import { DangerButton } from "./Editors";
 import { RunList } from "./RunRecords";
-import { Card, IconButton, Label, Segmented, Tabs } from "./ui";
+import { Card, IconButton, Label, Segmented, Switch, Tabs } from "./ui";
+import { searchReady } from "../lib/search";
 
 export function DetailPanel() {
   const { agents, groups } = useData();
@@ -169,8 +170,10 @@ function MemberList({ group, members }: { group: Group; members: Agent[] }) {
 }
 
 function AgentInfo({ agent }: { agent: Agent }) {
-  const { providers, defaultModel, setParam, updateAgent } = useData();
+  const { providers, defaultModel, setParam, updateAgent, search } = useData();
+  const openSettings = useUi((s) => s.openSettings);
   const dev = usePrefs((s) => s.mode === "dev");
+  const searchOk = searchReady(search);
   const target = resolveModel(agent, providers, defaultModel);
   const fallback = resolveModel(undefined, providers, defaultModel);
   const inherits = !agent.model || !target || target.provider.id !== agent.model.provider;
@@ -190,6 +193,24 @@ function AgentInfo({ agent }: { agent: Agent }) {
           inheritLabel={fallback ? `跟随默认（${fallback.modelId}）` : "跟随默认"}
           shown={target ? { title: target.modelId, subtitle: inherits ? `默认 · ${target.provider.name}` : target.provider.name } : null}
         />
+      </div>
+      <div>
+        <Label>能力</Label>
+        <Card className="flex items-center gap-3 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <div className="font-medium">联网搜索</div>
+            <div className="text-[13px] text-fg-3">
+              {searchOk ? (
+                "需要时搜索网页、阅读原文，回答里标注来源"
+              ) : (
+                <button type="button" onClick={() => openSettings("search")} className="text-accent-text hover:underline">
+                  先连接一个搜索服务
+                </button>
+              )}
+            </div>
+          </div>
+          <Switch checked={!!agent.web} onChange={(web) => updateAgent(agent.id, { web })} label="联网搜索" />
+        </Card>
       </div>
       <div>
         <Label>角色设定</Label>

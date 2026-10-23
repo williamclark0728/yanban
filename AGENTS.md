@@ -6,14 +6,15 @@
 
 - `npm run dev` → http://localhost:5180（端口固定，`/api/relay` 由 `vite.config.ts` 里的插件提供）
 - 每次改动后依次运行：`npx tsc -b`、`npm run build`、`npm run check:copy`
-- 不用真实 Key 的端到端测试：`node scripts/mock-llm.mjs`，在设置里添加自定义服务，Base URL 填 `http://127.0.0.1:5199/v1`。它能扮演主持人（返回分工 JSON）和审查人（第 1 轮报问题，第 2 轮通过）
+- 不用真实 Key 的端到端测试：`node scripts/mock-llm.mjs`，在设置里添加自定义服务，Base URL 填 `http://127.0.0.1:5199/v1`。它能扮演主持人（返回分工 JSON）和审查人（第 1 轮报问题，第 2 轮通过）；消息含「搜索」时调用 web_search，含「交给群」时调用 dispatch_to_group；模型 `mock-plain` 模拟不支持工具。搜索服务选 SearXNG、地址填 `http://127.0.0.1:5199` 即可用模拟搜索
 - 线上环境预演：`npm run build && npx wrangler pages dev dist --port 8788`
 
 ## 代码地图
 
 - `src/lib/llm.ts`：按协议创建模型，`streamReply`（流式）和 `completeText`（一次性），模型列表，连接测试，`describeError`（把错误转成一句中文）
 - `src/lib/chat.ts`：系统提示（四要素、记忆、当前日期）、上下文组装（附件、图片、群聊记录 `transcript`）、`speak`（流式发言写进消息）、私聊
-- `src/lib/collab.ts`：群聊入口 `sendToGroup`、@ 回复、`collaborate`（分工 → 产出 / 修订 → 审查 → `judge` → 交付）、`runBaseline`（单 Agent 对照）、`acceptance`（接受率）
+- `src/lib/collab.ts`：群聊入口 `sendToGroup`、@ 回复、`collaborate`（分工 → 产出 / 修订 → 审查 → `judge` → 交付）、`runBaseline`（单 Agent 对照）、`acceptance`（接受率）；`dispatchTools`（私聊里主持人把任务派到群，等交付后返回结果）
+- `src/lib/tools.ts`、`src/lib/search.ts`：`web_search` 和 `read_page` 工具，搜索服务配置在 设置 → 联网搜索；每次工具调用写进消息的 `tools` 字段，界面显示为步骤和来源。工具都在浏览器里执行，网络请求走 `/api/relay`
 - `src/lib/files.ts`：附件读取；`src/lib/export.ts`：记录导出
 - `src/store.ts`：Zustand store，所有写操作都同步写入 IndexedDB；`resolveModel` 决定每个智能体实际用哪个模型
 - `relay/handler.ts`：开发环境和 Cloudflare 共用的转发逻辑

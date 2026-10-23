@@ -8,6 +8,7 @@ import { usePrefs, useUi } from "../store";
 import type { Agent, Issue, Message, Usage, Verdict } from "../types";
 import { BotAvatar, palette } from "./Avatar";
 import { FileCard } from "./FileCard";
+import { citations, ToolSteps } from "./ToolSteps";
 
 function withMentions(text: string, agents: Agent[]) {
   const me = usePrefs.getState().name.trim();
@@ -19,7 +20,16 @@ function withMentions(text: string, agents: Agent[]) {
   });
 }
 
-export function RichText({ text, agents }: { text: string; agents: Agent[] }) {
+/** `[3]` after a web search becomes a link to that source. */
+function withCitations(text: string, cites?: Map<number, string>) {
+  if (!cites?.size) return text;
+  return text.replace(/\[(\d{1,3})\](?![(:])/g, (whole, n: string) => {
+    const url = cites.get(Number(n));
+    return url ? `[${n}](cite:${url})` : whole;
+  });
+}
+
+export function RichText({ text, agents, cites }: { text: string; agents: Agent[]; cites?: Map<number, string> }) {
   return (
     <div className="prose-chat">
       <Markdown
@@ -27,6 +37,18 @@ export function RichText({ text, agents }: { text: string; agents: Agent[] }) {
         urlTransform={(url) => url}
         components={{
           a: ({ href, children }) => {
+            if (href?.startsWith("cite:")) {
+              return (
+                <a
+                  href={href.slice(5)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mx-px inline-grid h-[18px] min-w-[18px] place-items-center rounded-md bg-accent-soft px-1 align-[2px] text-[11px] font-semibold text-accent-text no-underline"
+                >
+                  {children}
+                </a>
+              );
+            }
             if (href?.startsWith("mention:")) {
               const agent = agents.find((a) => a.id === href.slice(8));
               return (
@@ -47,7 +69,7 @@ export function RichText({ text, agents }: { text: string; agents: Agent[] }) {
           },
         }}
       >
-        {withMentions(text, agents)}
+        {withCitations(withMentions(text, agents), cites)}
       </Markdown>
     </div>
   );
@@ -213,6 +235,9 @@ export function MessageItem({
     return (
       <div className={clsx("group flex justify-end", first ? "mt-4" : "mt-1")}>
         <div className="flex max-w-[min(620px,85%)] flex-col items-end">
+          {msg.kind === "text" && msg.via && (
+            <span className="mb-1 mr-3 text-[12px] text-fg-3">{agents.find((a) => a.id === msg.via)?.name ?? "主持人"}从私聊转来</span>
+          )}
           {msg.kind === "text" &&
             msg.attachments?.map((f, i) => <FileCard key={f.id ?? i} file={f} />)}
           {msg.text && (
@@ -230,7 +255,8 @@ export function MessageItem({
   const failed = msg.kind === "text" && msg.status === "error";
   const stopped = msg.kind === "text" && msg.status === "stopped";
   const reasoning = msg.kind === "text" ? msg.reasoning : undefined;
-  const hasBody = !!msg.text || !!reasoning || streaming;
+  const tools = msg.tools?.length ? msg.tools : undefined;
+  const hasBody = !!msg.text || !!reasoning || !!tools || streaming;
 
   return (
     <div className={clsx("group flex items-end gap-2.5", first ? "mt-4" : "mt-1")}>
@@ -246,7 +272,8 @@ export function MessageItem({
         {hasBody && (
           <div className="rounded-[20px] bg-bubble px-4 py-2.5">
             {reasoning && <Reasoning text={reasoning} live={streaming && !msg.text} />}
-            {msg.text ? <RichText text={msg.text} agents={agents} /> : streaming && !reasoning && <Typing />}
+            {tools && <ToolSteps steps={tools} />}
+            {msg.text ? <RichText text={msg.text} agents={agents} cites={citations(tools)} /> : streaming && !reasoning && <Typing />}
             {msg.kind === "review" && (
               <div className="mt-2.5 border-t border-line pt-2.5">
                 <IssueList issues={msg.issues} />

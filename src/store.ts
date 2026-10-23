@@ -2,11 +2,11 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { presets, fromPreset } from "./lib/catalog";
 import { addExamples, db, ensureSeeded, getKv, setKv } from "./lib/db";
-import type { Agent, ChatRef, Group, Message, ModelRef, Provider, Run } from "./types";
+import type { Agent, ChatRef, Group, Message, ModelRef, Provider, Run, SearchConfig } from "./types";
 
 export type Theme = "dark" | "light" | "system";
 export type PanelTab = "info" | "members" | "runs" | "memory";
-export type SettingsTab = "general" | "providers";
+export type SettingsTab = "general" | "providers" | "search";
 
 interface Prefs {
   mode: "simple" | "dev";
@@ -84,6 +84,9 @@ interface Data {
   unread: Record<string, number>;
   /** The site's free trial model, when the server offers one. */
   trial: Trial | null;
+  /** Web search service and keys, kept in this browser like provider keys. */
+  search: SearchConfig;
+  saveSearch: (c: SearchConfig) => void;
   load: () => Promise<void>;
   refreshTrial: () => Promise<void>;
   setTrialRemaining: (remaining: number) => void;
@@ -143,21 +146,23 @@ export const useData = create<Data>()((set, get) => ({
   defaultModel: null,
   unread: {},
   trial: null,
+  search: { provider: "bocha", keys: {} },
 
   load: async () => {
     await ensureSeeded();
-    const [agents, groups, messages, runs, providers, defaultModel] = await Promise.all([
+    const [agents, groups, messages, runs, providers, defaultModel, search] = await Promise.all([
       db.agents.toArray(),
       db.groups.toArray(),
       db.messages.orderBy("at").toArray(),
       db.runs.toArray(),
       db.providers.toArray(),
       getKv<ModelRef | null>("defaultModel", null),
+      getKv<SearchConfig>("search", { provider: "bocha", keys: {} }),
     ]);
     // A reply that was streaming when the page closed ends as stopped.
     const fixed = messages.map((m) => (m.kind === "text" && m.status === "streaming" ? { ...m, status: "stopped" as const } : m));
     const trial = get().trial;
-    set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(trial ? [...providers, trialProvider(trial)] : providers), defaultModel });
+    set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(trial ? [...providers, trialProvider(trial)] : providers), defaultModel, search });
     void get().refreshTrial();
   },
 
@@ -174,6 +179,11 @@ export const useData = create<Data>()((set, get) => ({
       const rest = s.providers.filter((p) => p.id !== TRIAL_ID);
       return { trial, providers: sortProviders(trial ? [...rest, trialProvider(trial)] : rest) };
     });
+  },
+
+  saveSearch: (search) => {
+    set({ search });
+    void setKv("search", search);
   },
 
   setTrialRemaining: (remaining) => set((s) => (s.trial ? { trial: { ...s.trial, remaining } } : {})),

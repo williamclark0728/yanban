@@ -110,14 +110,18 @@ export function memoryLimiter(): Limiter {
   };
 }
 
-type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string } };
+type ChatMessage = { role: "system" | "user" | "assistant" | "tool"; content: string; tool_calls?: ToolCall[]; tool_call_id?: string };
 
-/** Keeps only plain text turns; image parts become a placeholder since the trial models read text only. */
+/**
+ * Keeps text turns and tool turns; image parts become a placeholder since the trial models read text only.
+ * Only the fields each role needs are passed on.
+ */
 function cleanMessages(raw: unknown): ChatMessage[] | null {
   if (!Array.isArray(raw)) return null;
   const out: ChatMessage[] = [];
   for (const m of raw) {
-    if (!m || !["system", "user", "assistant"].includes(m.role)) continue;
+    if (!m || !["system", "user", "assistant", "tool"].includes(m.role)) continue;
     let content = "";
     if (typeof m.content === "string") content = m.content;
     else if (Array.isArray(m.content)) {
@@ -126,9 +130,28 @@ function cleanMessages(raw: unknown): ChatMessage[] | null {
         .filter(Boolean)
         .join("\n");
     }
-    out.push({ role: m.role, content });
+    const msg: ChatMessage = { role: m.role, content };
+    if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+      msg.tool_calls = m.tool_calls.map((c: ToolCall) => ({
+        id: String(c.id),
+        type: "function",
+        function: { name: String(c.function?.name), arguments: typeof c.function?.arguments === "string" ? c.function.arguments : JSON.stringify(c.function?.arguments ?? {}) },
+      }));
+    }
+    if (m.role === "tool") msg.tool_call_id = String(m.tool_call_id ?? "");
+    out.push(msg);
   }
   return out.length ? out : null;
+}
+
+/** Function tool definitions as the OpenAI format describes them; anything else is dropped. */
+function cleanTools(raw: unknown) {
+  if (!Array.isArray(raw)) return undefined;
+  const tools = raw
+    .filter((t) => t?.type === "function" && typeof t.function?.name === "string")
+    .slice(0, 16)
+    .map((t) => ({ type: "function", function: { name: t.function.name, description: String(t.function.description ?? ""), parameters: t.function.parameters ?? { type: "object" } } }));
+  return tools.length ? tools : undefined;
 }
 
 const num = (v: unknown, lo: number, hi: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(Math.max(v, lo), hi) : undefined);
@@ -171,17 +194,23 @@ export async function trial(request: Request, env: TrialEnv, ip: string, limiter
   }
   const remaining = String(limit - count);
 
-  const input = {
+  const tools = cleanTools(body.tools);
+  const input: Input = {
     messages,
     stream: body.stream === true,
     max_tokens: num(body.max_tokens, 1, MAX_OUTPUT) ?? 2048,
     temperature: num(body.temperature, 0, 2),
     top_p: num(body.top_p, 0, 1),
+    ...(tools ? { tools, tool_choice: typeof body.tool_choice === "string" ? body.tool_choice : "auto" } : {}),
   };
 
   for (const b of list) {
     try {
       const res = b.kind === "openai" ? await callOpenAi(b, input, request.signal) : await callWorkersAi(b, env.AI!, input);
+      if (res && !res.ok) {
+        await limiter.refund(visitor, day);
+        return res;
+      }
       if (res) {
         res.headers.set("x-trial-remaining", remaining);
         res.headers.set("cache-control", "no-store");
@@ -195,7 +224,7 @@ export async function trial(request: Request, env: TrialEnv, ip: string, limiter
   return json(503, UNAVAILABLE);
 }
 
-type Input = { messages: ChatMessage[]; stream: boolean; max_tokens: number; temperature?: number; top_p?: number };
+type Input = { messages: ChatMessage[]; stream: boolean; max_tokens: number; temperature?: number; top_p?: number; tools?: unknown[]; tool_choice?: string };
 
 /** Returns null when the service is busy or failing, so the next backend can take over. */
 async function callOpenAi(b: Extract<Backend, { kind: "openai" }>, input: Input, signal: AbortSignal) {
@@ -209,7 +238,12 @@ async function callOpenAi(b: Extract<Backend, { kind: "openai" }>, input: Input,
     body: JSON.stringify(payload),
     signal,
   });
-  if (!res.ok || !res.body) return null;
+  if (!res.ok || !res.body) {
+    // A model that cannot take tools says so with a 400; passing that on lets the app ask again without them.
+    const body = await res.text();
+    if (res.status === 400 && input.tools && /tool|function/i.test(body)) return json(400, "tools are not supported by this model");
+    return null;
+  }
   return new Response(res.body, { status: 200, headers: { "content-type": res.headers.get("content-type") ?? "application/json" } });
 }
 
@@ -221,8 +255,15 @@ async function callWorkersAi(b: Extract<Backend, { kind: "ai" }>, ai: NonNullabl
     if (sys >= 0) messages[sys] = { ...messages[sys], content: `${messages[sys].content}\n/no_think` };
     else messages.unshift({ role: "system", content: "/no_think" });
   }
-  const result = await ai.run(b.model, { ...input, messages });
   const model = label(b);
+  // Streamed tool calls from Workers AI are not documented, so a turn that offers tools is fetched whole
+  // and replayed as a stream when one was asked for.
+  if (input.tools) {
+    const completion = toOpenAiCompletion(await ai.run(b.model, { ...input, messages, stream: false }), model);
+    if (!input.stream) return Response.json(completion);
+    return new Response(completionToStream(completion), { headers: { "content-type": "text/event-stream; charset=utf-8" } });
+  }
+  const result = await ai.run(b.model, { ...input, messages });
   if (input.stream) {
     if (!(result instanceof ReadableStream)) return null;
     return new Response(toOpenAiStream(result, model), { headers: { "content-type": "text/event-stream; charset=utf-8" } });
@@ -329,18 +370,68 @@ function toOpenAiStream(source: ReadableStream<Uint8Array>, model: string) {
   );
 }
 
+type RawCall = { id?: string; name?: string; arguments?: unknown; function?: { name?: string; arguments?: unknown } };
+
+/** Tool calls arrive either OpenAI-style (`function.name`) or flat (`name`, object `arguments`). */
+function toolCalls(raw?: RawCall[]): ToolCall[] {
+  return (raw ?? [])
+    .map((c) => {
+      const name = c.function?.name ?? c.name;
+      const args = c.function?.arguments ?? c.arguments ?? {};
+      return name ? { id: c.id || `call_${crypto.randomUUID().slice(0, 8)}`, type: "function" as const, function: { name, arguments: typeof args === "string" ? args : JSON.stringify(args) } } : null;
+    })
+    .filter((c): c is ToolCall => !!c);
+}
+
+type Completion = ReturnType<typeof toOpenAiCompletion>;
+
 function toOpenAiCompletion(result: unknown, model: string) {
-  const r = (result ?? {}) as { response?: string; usage?: unknown; choices?: { message?: { content?: string; reasoning_content?: string } }[] };
-  const raw = r.choices?.[0]?.message ?? { content: typeof r.response === "string" ? r.response : "" };
+  const r = (result ?? {}) as {
+    response?: string;
+    usage?: unknown;
+    tool_calls?: RawCall[];
+    choices?: { message?: { content?: string | null; reasoning_content?: string; tool_calls?: RawCall[] } }[];
+  };
+  const raw = r.choices?.[0]?.message ?? { content: typeof r.response === "string" ? r.response : "", tool_calls: r.tool_calls };
   const split = thinkSplitter();
   const { content, reasoning } = split(raw.content ?? "", true);
   const reasoningText = [raw.reasoning_content, reasoning].filter((s) => s?.trim()).join("\n").trim();
+  const calls = toolCalls(raw.tool_calls);
   return {
     id: `trial-${crypto.randomUUID()}`,
     object: "chat.completion",
     created: Math.floor(Date.now() / 1000),
     model,
-    choices: [{ index: 0, message: { role: "assistant", content: content.trimStart(), ...(reasoningText ? { reasoning_content: reasoningText } : {}) }, finish_reason: "stop" }],
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          content: content.trimStart(),
+          ...(reasoningText ? { reasoning_content: reasoningText } : {}),
+          ...(calls.length ? { tool_calls: calls } : {}),
+        },
+        finish_reason: calls.length ? "tool_calls" : "stop",
+      },
+    ],
     ...(r.usage ? { usage: r.usage } : {}),
   };
+}
+
+/** Replays a whole completion as stream chunks. */
+function completionToStream(c: Completion) {
+  const enc = new TextEncoder();
+  const { message, finish_reason } = c.choices[0];
+  const chunk = (delta: Record<string, unknown>, finish: string | null = null, extra: Record<string, unknown> = {}) =>
+    enc.encode(`data: ${JSON.stringify({ id: c.id, object: "chat.completion.chunk", created: c.created, model: c.model, choices: [{ index: 0, delta, finish_reason: finish }], ...extra })}\n\n`);
+  return new ReadableStream<Uint8Array>({
+    start(ctl) {
+      if (message.reasoning_content) ctl.enqueue(chunk({ role: "assistant", reasoning_content: message.reasoning_content }));
+      if (message.content) ctl.enqueue(chunk({ role: "assistant", content: message.content }));
+      message.tool_calls?.forEach((call, index) => ctl.enqueue(chunk({ tool_calls: [{ index, ...call }] })));
+      ctl.enqueue(chunk({}, finish_reason, "usage" in c ? { usage: c.usage } : {}));
+      ctl.enqueue(enc.encode("data: [DONE]\n\n"));
+      ctl.close();
+    },
+  });
 }

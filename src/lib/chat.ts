@@ -1,9 +1,11 @@
-import type { ImagePart, ModelMessage, UserContent } from "ai";
+import type { ImagePart, ModelMessage, ToolSet, UserContent } from "ai";
 import { create } from "zustand";
 import { resolveModel, useData, usePrefs } from "../store";
 import type { Agent, Attachment, Group, Issue, Message, TextMessage } from "../types";
 import { attachmentText, hasImages } from "./files";
+import { dispatchRules, dispatchTools } from "./collab";
 import { describeError, streamReply } from "./llm";
+import { tracer, WEB_RULES, webEnabled, webTools, type Report } from "./tools";
 
 /** Chats with work in flight. One run per chat; stopping a chat aborts all of its replies. */
 export const useBusy = create<Record<string, boolean>>(() => ({}));
@@ -40,6 +42,7 @@ export function systemPrompt(agent: Agent) {
   const me = usePrefs.getState().name.trim();
   if (me) lines.push(`用户的称呼：${me}`);
   if (agent.memory.length) lines.push("", "关于用户你已经知道：", ...agent.memory.map((m) => `- ${m}`));
+  if (webEnabled(agent)) lines.push("", WEB_RULES);
   lines.push("", `现在是${now()}。`, "用用户的语言回答，回答直接、具体。");
   return lines.join("\n");
 }
@@ -160,8 +163,18 @@ interface Spoken {
   messageId: string;
 }
 
-/** Streams one agent's reply into a chat as a new message. */
-export async function speak(opts: { chat: string; agent: Agent; system: string; messages: ModelMessage[]; signal: AbortSignal }): Promise<Spoken> {
+/**
+ * Streams one agent's reply into a chat as a new message.
+ * Agents with web access get the search tools; `extraTools` adds more (the lead's dispatch tool).
+ */
+export async function speak(opts: {
+  chat: string;
+  agent: Agent;
+  system: string;
+  messages: ModelMessage[];
+  signal: AbortSignal;
+  extraTools?: (report: Report) => ToolSet;
+}): Promise<Spoken> {
   const { providers, defaultModel, addMessage, patchMessage } = useData.getState();
   const id = uid();
   addMessage({ id, chat: opts.chat, kind: "text", sender: opts.agent.id, text: "", status: "streaming", at: Date.now() });
@@ -171,6 +184,9 @@ export async function speak(opts: { chat: string; agent: Agent; system: string; 
     patchMessage(id, { status: "error", error: { message: "还没有连接模型服务" } }, true);
     return { ok: false, text: "", tokens: 0, messageId: id };
   }
+
+  const { report, halt } = tracer(id);
+  const tools = { ...(webEnabled(opts.agent) ? webTools(report) : {}), ...opts.extraTools?.(report) };
 
   let text = "";
   let reasoning = "";
@@ -196,6 +212,7 @@ export async function speak(opts: { chat: string; agent: Agent; system: string; 
       messages: opts.messages,
       params: opts.agent.params,
       signal: opts.signal,
+      tools: Object.keys(tools).length ? tools : undefined,
       onText: (d) => {
         text += d;
         schedule();
@@ -214,6 +231,7 @@ export async function speak(opts: { chat: string; agent: Agent; system: string; 
     return { ok: true, text, tokens: r.input + r.output, messageId: id };
   } catch (e) {
     done = true;
+    halt();
     if (opts.signal.aborted) patchMessage(id, { text, reasoning: reasoning.trim() ? reasoning : undefined, status: "stopped" }, true);
     else {
       const error = describeError(e);
@@ -237,8 +255,19 @@ export async function reply(agentId: string) {
   const c = agent && begin(agentId);
   if (!agent || !c) return;
   try {
-    const context = privateHistory(useData.getState().messages, agentId, agent.params.history);
-    await speak({ chat: agentId, agent, system: systemPrompt(agent), messages: context, signal: c.signal });
+    const { messages, groups } = useData.getState();
+    const context = privateHistory(messages, agentId, agent.params.history);
+    // A lead can hand work to the groups it runs, taking along the files from the user's latest message.
+    const led = groups.filter((g) => g.leadId === agent.id);
+    const asked = messages.findLast((m): m is TextMessage => m.chat === agentId && m.kind === "text" && m.sender === "me");
+    await speak({
+      chat: agentId,
+      agent,
+      system: led.length ? `${systemPrompt(agent)}\n\n${dispatchRules(led)}` : systemPrompt(agent),
+      messages: context,
+      signal: c.signal,
+      extraTools: led.length ? (report) => dispatchTools(agent, led, report, asked?.attachments) : undefined,
+    });
   } finally {
     end(agentId);
   }

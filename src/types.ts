@@ -29,6 +29,8 @@ export interface Agent {
   model: ModelRef | null; // null follows the default model
   params: ModelParams;
   memory: string[];
+  /** May search the web and read pages. */
+  web?: boolean;
 }
 
 export interface Group {
@@ -84,9 +86,45 @@ export type TextMessage = Base & {
   error?: { message: string; detail?: string };
   usage?: Usage;
   attachments?: Attachment[];
+  /** Tools the agent used while writing this reply, in order. */
+  tools?: ToolTrace[];
+  /** Set on a task the lead brought over from a private chat: that lead's id. */
+  via?: string;
 };
 
-export type ReviewMessage = Base & { kind: "review"; sender: string; text: string; issues: Issue[]; usage?: Usage; reasoning?: string };
+export interface Source {
+  title: string;
+  url: string;
+  site?: string;
+  date?: string;
+}
+
+export interface ToolTrace {
+  id: string;
+  name: "web_search" | "read_page" | "dispatch_to_group";
+  /** One line for the UI, e.g. the search query or the group name. */
+  label: string;
+  status: "running" | "done" | "error";
+  detail?: string;
+  sources?: Source[];
+  /** Citation number of the first source; later ones count up from it. */
+  first?: number;
+  /** The group a dispatch went to. */
+  groupId?: string;
+}
+
+export type SearchProvider = "bocha" | "tavily" | "searxng";
+
+export interface SearchConfig {
+  provider: SearchProvider;
+  keys: Partial<Record<SearchProvider, string>>;
+  /** Base URL of a self-hosted SearXNG instance. */
+  searxngUrl?: string;
+  /** Optional Jina key for reading pages; without one Jina allows a lower rate. */
+  jinaKey?: string;
+}
+
+export type ReviewMessage = Base & { kind: "review"; sender: string; text: string; issues: Issue[]; usage?: Usage; reasoning?: string; tools?: ToolTrace[] };
 
 export type Verdict = "revise" | "pass" | "stop" | "done";
 

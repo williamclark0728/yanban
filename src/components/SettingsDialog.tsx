@@ -1,10 +1,11 @@
 import clsx from "clsx";
-import { CheckCircle2, ChevronLeft, ExternalLink, Eye, EyeOff, Loader2, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ExternalLink, Eye, EyeOff, Globe, Loader2, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { protocols } from "../lib/catalog";
 import { describeError, listModels, testProvider } from "../lib/llm";
 import { isReady, resolveModel, TRIAL_ID, useData, usePrefs, useUi, type SettingsTab } from "../store";
-import type { Provider } from "../types";
+import type { Provider, SearchConfig } from "../types";
+import { searchProviders, searchReady, webSearch } from "../lib/search";
 import { seedAgents, seedGroups } from "../lib/seed";
 import { MeAvatar } from "./Avatar";
 import { ModelPicker } from "./ModelPicker";
@@ -27,6 +28,7 @@ export function SettingsDialog() {
   const nav: { value: SettingsTab; label: string; icon: ReactNode }[] = [
     { value: "general", label: "通用", icon: <SlidersHorizontal size={17} /> },
     { value: "providers", label: "模型服务", icon: <Server size={17} /> },
+    { value: "search", label: "联网搜索", icon: <Globe size={17} /> },
   ];
 
   return (
@@ -75,6 +77,7 @@ export function SettingsDialog() {
           <div className="scroll min-h-0 flex-1 px-4 pb-6 md:px-6">
             {settingsTab === "general" && <General />}
             {settingsTab === "providers" && <Providers />}
+            {settingsTab === "search" && <SearchSettings />}
           </div>
         </section>
       </div>
@@ -269,11 +272,149 @@ const inputCls =
 
 type Status = { kind: "busy"; text: string } | { kind: "ok"; text: string } | { kind: "error"; text: string; detail?: string } | null;
 
+function StatusBox({ status }: { status: Status }) {
+  const dev = usePrefs((s) => s.mode === "dev");
+  if (!status) return null;
+  return (
+    <div
+      className={clsx(
+        "rounded-xl px-3.5 py-2.5 text-sm",
+        status.kind === "ok" && "bg-ok-soft text-ok",
+        status.kind === "error" && "bg-bad-soft text-bad",
+        status.kind === "busy" && "bg-active text-fg-2",
+      )}
+    >
+      <div className="flex items-center gap-2">
+        {status.kind === "busy" && <Loader2 size={16} className="animate-spin" />}
+        {status.kind === "ok" && <CheckCircle2 size={16} />}
+        {status.kind === "error" && <XCircle size={16} />}
+        {status.text}
+      </div>
+      {status.kind === "error" && dev && status.detail && <div className="mt-1 break-all font-mono text-xs text-fg-2">{status.detail}</div>}
+    </div>
+  );
+}
+
+function SecretInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <input
+        type={show ? "text" : "password"}
+        autoComplete="off"
+        spellCheck={false}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={clsx(inputCls, "pr-11 font-mono")}
+        placeholder={placeholder}
+      />
+      <button
+        type="button"
+        aria-label={show ? "隐藏" : "显示"}
+        onClick={() => setShow((v) => !v)}
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-fg-3 hover:text-fg"
+      >
+        {show ? <EyeOff size={18} /> : <Eye size={18} />}
+      </button>
+    </div>
+  );
+}
+
+function SearchSettings() {
+  const { search, saveSearch, agents } = useData();
+  const [draft, setDraft] = useState<SearchConfig>(search);
+  const [status, setStatus] = useState<Status>(null);
+  const meta = searchProviders.find((p) => p.value === draft.provider)!;
+  const set = (patch: Partial<SearchConfig>) => {
+    setDraft((d) => ({ ...d, ...patch }));
+    setStatus(null);
+  };
+  const setKey = (v: string) => set({ keys: { ...draft.keys, [draft.provider]: v.trim() } });
+  const ready = searchReady(draft);
+  const webAgents = agents.filter((a) => a.web);
+
+  const test = async () => {
+    if (!ready) return setStatus({ kind: "error", text: draft.provider === "searxng" ? "先填 SearXNG 地址" : "先填 API Key" });
+    setStatus({ kind: "busy", text: "正在搜索…" });
+    try {
+      const hits = await webSearch(draft, "今天的科技新闻");
+      setStatus({ kind: "ok", text: `连接成功，搜到 ${hits.length} 条结果` });
+    } catch (e) {
+      const err = describeError(e);
+      setStatus({ kind: "error", text: err.message, detail: err.detail });
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <p className="px-1 text-[13px] text-fg-3">
+        连接搜索服务后，在智能体资料里打开「联网搜索」，它就能搜网页、读原文，回答里标注来源。
+        {webAgents.length > 0 && ` 已开启：${webAgents.map((a) => a.name).join("、")}。`}
+      </p>
+      <Field label="搜索服务" hint={meta.hint}>
+        <Segmented value={draft.provider} onChange={(provider) => set({ provider })} options={searchProviders.map((p) => ({ value: p.value, label: p.label }))} />
+      </Field>
+      {draft.provider === "searxng" ? (
+        <Field label="SearXNG 地址" hint="需要在实例设置里允许 JSON 格式">
+          <input
+            className={clsx(inputCls, "font-mono text-sm")}
+            value={draft.searxngUrl ?? ""}
+            onChange={(e) => set({ searxngUrl: e.target.value })}
+            placeholder="https://searx.example.com"
+          />
+        </Field>
+      ) : (
+        <Field
+          label={
+            <span className="flex items-center justify-between">
+              API Key
+              {meta.keyUrl && (
+                <a href={meta.keyUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[13px] font-normal text-accent-text hover:underline">
+                  获取 API Key <ExternalLink size={13} />
+                </a>
+              )}
+            </span>
+          }
+          hint="保存在本机浏览器"
+        >
+          <SecretInput value={draft.keys[draft.provider] ?? ""} onChange={setKey} placeholder={draft.provider === "tavily" ? "tvly-..." : "sk-..."} />
+        </Field>
+      )}
+      <Field label="Jina Key（可选）" hint="读取网页全文用 Jina Reader，不填也能用，填了频率限制更宽">
+        <SecretInput value={draft.jinaKey ?? ""} onChange={(v) => set({ jinaKey: v.trim() })} placeholder="jina_..." />
+      </Field>
+
+      <StatusBox status={status} />
+
+      <div className="flex flex-wrap items-center gap-2 pt-1">
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={test}
+          disabled={status?.kind === "busy"}
+          className="h-10 rounded-full border border-line-2 px-5 text-sm font-medium hover:bg-hover disabled:opacity-50"
+        >
+          测试搜索
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            saveSearch(draft);
+            setStatus({ kind: "ok", text: ready ? "已保存" : "已保存，填好后才能使用" });
+          }}
+          className="h-10 rounded-full bg-fg px-5 text-sm font-semibold text-bg hover:opacity-90"
+        >
+          保存
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const blank: Provider = { id: "", name: "", protocol: "openai-chat", baseUrl: "", apiKey: "", models: [], enabled: false, custom: true };
 
 function ProviderForm({ provider, onClose }: { provider?: Provider; onClose: () => void }) {
   const { providers, defaultModel, saveProvider, removeProvider, setDefaultModel } = useData();
-  const dev = usePrefs((s) => s.mode === "dev");
   const isNew = !provider;
   const [draft, setDraft] = useState<Provider>(provider ?? blank);
   const [key, setKey] = useState("");
@@ -441,24 +582,7 @@ function ProviderForm({ provider, onClose }: { provider?: Provider; onClose: () 
         </div>
       </Field>
 
-      {status && (
-        <div
-          className={clsx(
-            "rounded-xl px-3.5 py-2.5 text-sm",
-            status.kind === "ok" && "bg-ok-soft text-ok",
-            status.kind === "error" && "bg-bad-soft text-bad",
-            status.kind === "busy" && "bg-active text-fg-2",
-          )}
-        >
-          <div className="flex items-center gap-2">
-            {status.kind === "busy" && <Loader2 size={16} className="animate-spin" />}
-            {status.kind === "ok" && <CheckCircle2 size={16} />}
-            {status.kind === "error" && <XCircle size={16} />}
-            {status.text}
-          </div>
-          {status.kind === "error" && dev && status.detail && <div className="mt-1 break-all font-mono text-xs text-fg-2">{status.detail}</div>}
-        </div>
-      )}
+      <StatusBox status={status} />
 
       <div className="flex flex-wrap items-center gap-2 pt-1">
         {provider && (provider.apiKey || provider.enabled) && (

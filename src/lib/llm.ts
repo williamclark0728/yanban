@@ -2,7 +2,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { APICallError, RetryError, generateText, streamText, type ModelMessage } from "ai";
+import { APICallError, RetryError, generateText, isStepCount, streamText, type ModelMessage, type ToolSet } from "ai";
 import { useData } from "../store";
 import type { ModelParams, Provider } from "../types";
 
@@ -40,6 +40,9 @@ function fetchFor(p: Pick<Provider, "baseUrl">): typeof fetch {
     return fetch(RELAY, { ...init, headers });
   };
 }
+
+/** Fetches any URL the way model calls do: directly when allowed, otherwise through the relay. */
+export const proxiedFetch = (url: string, init?: RequestInit) => fetchFor({ baseUrl: url })(url, init);
 
 const trimSlash = (s: string) => s.trim().replace(/\/+$/, "");
 /** The SDKs need absolute URLs; this site's own API is stored as a path. */
@@ -159,34 +162,16 @@ export function describeError(e: unknown): { message: string; detail?: string } 
   return { message: (err as Error)?.message || "出错了", detail };
 }
 
-/** One-shot call for structured steps (planning) where streaming adds nothing. */
-export async function completeText(opts: {
+interface CallOptions {
   provider: Provider;
   modelId: string;
   system: string;
   messages: ModelMessage[];
   params: ModelParams;
   signal: AbortSignal;
-}): Promise<StreamResult & { text: string; reasoning: string }> {
-  const { provider, params } = opts;
-  const started = performance.now();
-  const r = await generateText({
-    model: languageModel(provider, opts.modelId),
-    system: opts.system,
-    messages: opts.messages,
-    temperature: provider.protocol === "anthropic" ? Math.min(params.temperature, 1) : params.temperature,
-    topP: params.topP < 1 ? params.topP : undefined,
-    maxOutputTokens: params.maxTokens,
-    abortSignal: opts.signal,
-    maxRetries: 1,
-  });
-  return {
-    text: r.text,
-    reasoning: r.reasoningText ?? "",
-    input: r.totalUsage.inputTokens ?? 0,
-    output: r.totalUsage.outputTokens ?? 0,
-    seconds: Math.round((performance.now() - started) / 100) / 10,
-  };
+  /** Tools the model may call; calls run in a loop until it answers or `maxSteps` is reached. */
+  tools?: ToolSet;
+  maxSteps?: number;
 }
 
 export interface StreamResult {
@@ -195,39 +180,94 @@ export interface StreamResult {
   seconds: number;
 }
 
-export async function streamReply(opts: {
-  provider: Provider;
-  modelId: string;
-  system: string;
-  messages: ModelMessage[];
-  params: ModelParams;
-  signal: AbortSignal;
-  onText: (delta: string) => void;
-  onReasoning: (delta: string) => void;
-}): Promise<StreamResult> {
+// Models that rejected tool definitions this session; they are called without tools from then on.
+const noTools = new Set<string>();
+const NO_TOOLS_NOTE = "\n\n（当前模型不支持工具：不能联网搜索，也不能把任务派到群里。用户需要这些时，如实告诉用户。）";
+
+/** A 400-class rejection that mentions tools or functions means the model cannot take tool definitions. */
+function rejectsTools(e: unknown) {
+  let err = e;
+  if (RetryError.isInstance(err)) err = err.lastError;
+  if (!APICallError.isInstance(err)) return false;
+  const status = err.statusCode ?? 0;
+  return status >= 400 && status < 500 && status !== 401 && status !== 403 && status !== 429 && /tool|function/i.test(err.responseBody ?? err.message);
+}
+
+function settings(opts: CallOptions, withTools: boolean) {
   const { provider, params } = opts;
-  const started = performance.now();
-  const result = streamText({
+  return {
     model: languageModel(provider, opts.modelId),
-    system: opts.system,
+    system: withTools ? opts.system : opts.tools ? opts.system + NO_TOOLS_NOTE : opts.system,
     messages: opts.messages,
     temperature: provider.protocol === "anthropic" ? Math.min(params.temperature, 1) : params.temperature,
     topP: params.topP < 1 ? params.topP : undefined,
     maxOutputTokens: params.maxTokens,
     abortSignal: opts.signal,
     maxRetries: 1,
-  });
-  for await (const part of result.stream) {
-    if (part.type === "text-delta") opts.onText(part.text);
-    else if (part.type === "reasoning-delta") opts.onReasoning(part.text);
-    else if (part.type === "error") throw part.error;
-    else if (part.type === "abort") break;
-  }
-  if (opts.signal.aborted) throw new DOMException("stopped", "AbortError");
-  const usage = await result.totalUsage;
-  return {
-    input: usage.inputTokens ?? 0,
-    output: usage.outputTokens ?? 0,
-    seconds: Math.round((performance.now() - started) / 100) / 10,
+    ...(withTools && opts.tools ? { tools: opts.tools, stopWhen: isStepCount(opts.maxSteps ?? 6) } : {}),
   };
+}
+
+/** Runs `call` with tools, and once more without them if the model turns tool definitions down. */
+async function withToolFallback<T>(opts: CallOptions, call: (withTools: boolean) => Promise<T>, produced: () => boolean): Promise<T> {
+  const key = `${opts.provider.id}/${opts.modelId}`;
+  const useTools = !!opts.tools && !noTools.has(key);
+  try {
+    return await call(useTools);
+  } catch (e) {
+    if (!useTools || produced() || opts.signal.aborted || !rejectsTools(e)) throw e;
+    noTools.add(key);
+    return call(false);
+  }
+}
+
+const seconds = (started: number) => Math.round((performance.now() - started) / 100) / 10;
+
+/** One-shot call for structured steps (planning, review) where streaming adds nothing. */
+export async function completeText(opts: CallOptions): Promise<StreamResult & { text: string; reasoning: string }> {
+  const started = performance.now();
+  const r = await withToolFallback(opts, (withTools) => generateText(settings(opts, withTools)), () => false);
+  return {
+    text: r.text,
+    reasoning: r.reasoningText ?? "",
+    input: r.totalUsage.inputTokens ?? 0,
+    output: r.totalUsage.outputTokens ?? 0,
+    seconds: seconds(started),
+  };
+}
+
+export async function streamReply(
+  opts: CallOptions & {
+    onText: (delta: string) => void;
+    onReasoning: (delta: string) => void;
+  },
+): Promise<StreamResult> {
+  const started = performance.now();
+  let produced = false;
+  const run = async (withTools: boolean) => {
+    const result = streamText(settings(opts, withTools));
+    // Text before and after a tool call arrives as separate steps; keep them apart.
+    let stepHadText = false;
+    let gap = false;
+    for await (const part of result.stream) {
+      if (part.type === "text-delta") {
+        if (!part.text) continue;
+        opts.onText(gap ? `\n\n${part.text}` : part.text);
+        gap = false;
+        stepHadText = produced = true;
+      } else if (part.type === "reasoning-delta") {
+        opts.onReasoning(part.text);
+        produced = true;
+      } else if (part.type === "finish-step") {
+        gap = gap || stepHadText;
+        stepHadText = false;
+      } else if (part.type === "tool-call") produced = true;
+      else if (part.type === "error") throw part.error;
+      else if (part.type === "abort") break;
+    }
+    if (opts.signal.aborted) throw new DOMException("stopped", "AbortError");
+    return result.totalUsage;
+  };
+  const usage = await withToolFallback(opts, run, () => produced);
+  return { input: usage.inputTokens ?? 0, output: usage.outputTokens ?? 0, seconds: seconds(started) };
 }

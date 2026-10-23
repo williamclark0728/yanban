@@ -50,6 +50,7 @@ export const seedAgents: Agent[] = [
     model: null,
     params: { ...defaults, temperature: 0.2 },
     memory: [],
+    web: true,
   },
   {
     id: "reviewer",
@@ -82,6 +83,7 @@ export const seedAgents: Agent[] = [
     model: null,
     params: { ...defaults },
     memory: [],
+    web: true,
   },
 ];
 
