@@ -2,7 +2,7 @@
 
 > 你只管提需求，一支 AI 团队替你分工、干活、互相挑错，最后交给你一份核对过的结果。
 
-**👉 一键体验：[yanban.shengzy.top](https://yanban.shengzy.top)**　打开就能用，不用注册
+**👉 一键体验：[yanban.shengzy.top](https://yanban.shengzy.top)**　打开就能用，不用注册，不填 Key 也能先聊
 
 还在担心 AI 没听懂你的意思，答非所问？
 还在担心 AI 一本正经地编数字、造引用？
@@ -34,7 +34,7 @@
 ## 三步上手
 
 1. 打开 [yanban.shengzy.top](https://yanban.shengzy.top)
-2. 在 设置 → 模型服务 里填一个 API Key（DeepSeek、通义千问、Kimi 等任选一个）
+2. 先用内置的体验模型直接聊（每天 30 次）；想长期用，就在 设置 → 模型服务 里填一个自己的 API Key
 3. 进「论文写作组」，把任务交给管家，然后看它们干活
 
 ## 接下来

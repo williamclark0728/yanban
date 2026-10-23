@@ -276,12 +276,21 @@ function toOpenAiStream(source: ReadableStream<Uint8Array>, model: string) {
   const split = thinkSplitter();
   let buffer = "";
   let usage: unknown;
+  // Qwen3 opens both its (disabled) reasoning and its answer with blank lines; drop them.
+  let reasoningStarted = false;
+  let contentStarted = false;
   const chunk = (delta: Record<string, string>, finish: string | null = null, extra: Record<string, unknown> = {}) =>
     enc.encode(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta, finish_reason: finish }], ...extra })}\n\n`);
   const emit = (ctl: TransformStreamDefaultController<Uint8Array>, content: string, reasoningIn = "", end = false) => {
-    const { content: text, reasoning } = split(content, end);
+    const { content: piece, reasoning } = split(content, end);
+    let thought = reasoningIn + reasoning;
+    let text = piece;
+    if (!reasoningStarted) thought = thought.trimStart();
+    if (!contentStarted) text = text.trimStart();
+    reasoningStarted ||= !!thought;
+    contentStarted ||= !!text;
     const delta: Record<string, string> = {};
-    if (reasoningIn || reasoning) delta.reasoning_content = reasoningIn + reasoning;
+    if (thought) delta.reasoning_content = thought;
     if (text) delta.content = text;
     if (Object.keys(delta).length) ctl.enqueue(chunk(delta));
   };
@@ -325,13 +334,13 @@ function toOpenAiCompletion(result: unknown, model: string) {
   const raw = r.choices?.[0]?.message ?? { content: typeof r.response === "string" ? r.response : "" };
   const split = thinkSplitter();
   const { content, reasoning } = split(raw.content ?? "", true);
-  const reasoningText = [raw.reasoning_content, reasoning].filter(Boolean).join("\n");
+  const reasoningText = [raw.reasoning_content, reasoning].filter((s) => s?.trim()).join("\n").trim();
   return {
     id: `trial-${crypto.randomUUID()}`,
     object: "chat.completion",
     created: Math.floor(Date.now() / 1000),
     model,
-    choices: [{ index: 0, message: { role: "assistant", content, ...(reasoningText ? { reasoning_content: reasoningText } : {}) }, finish_reason: "stop" }],
+    choices: [{ index: 0, message: { role: "assistant", content: content.trimStart(), ...(reasoningText ? { reasoning_content: reasoningText } : {}) }, finish_reason: "stop" }],
     ...(r.usage ? { usage: r.usage } : {}),
   };
 }

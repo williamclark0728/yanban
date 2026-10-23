@@ -270,7 +270,7 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
     const list = assignments.map((a, i) => `${i + 1}. @${a.agent.name}${a.type === "review" ? "（审查）" : ""} ${a.task}`).join("\n");
     patchMessage(
       plan.messageId,
-      { text: [intro || (assignments.length ? "收到，分工如下：" : ""), list].filter(Boolean).join("\n\n"), reasoning: plan.reasoning || undefined, status: undefined, usage: plan.usage },
+      { text: [intro || (assignments.length ? "收到，分工如下：" : ""), list].filter(Boolean).join("\n\n"), reasoning: plan.reasoning?.trim() ? plan.reasoning : undefined, status: undefined, usage: plan.usage },
       true,
     );
     if (assignments.length === 0) {
@@ -339,7 +339,7 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
           patchMessage(
             t.messageId,
             // The typing bubble becomes a review message; `status` is cleared so it stops showing as in progress.
-            { kind: "review", text: review.summary || "审查完成", issues: review.issues, reasoning: t.reasoning || undefined, status: undefined, usage: t.usage } as unknown as Partial<Message>,
+            { kind: "review", text: review.summary || "审查完成", issues: review.issues, reasoning: t.reasoning?.trim() ? t.reasoning : undefined, status: undefined, usage: t.usage } as unknown as Partial<Message>,
             true,
           );
           round.steps.push({ agentId: a.agent.id, type: "review", summary: review.summary || "审查完成", issues: review.issues, tokens: t.tokens, messageId: t.messageId });

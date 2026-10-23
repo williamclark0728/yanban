@@ -178,7 +178,7 @@ export async function speak(opts: { chat: string; agent: Agent; system: string; 
   let done = false;
   const flush = () => {
     queued = false;
-    if (!done) patchMessage(id, { text, reasoning: reasoning || undefined });
+    if (!done) patchMessage(id, { text, reasoning: reasoning.trim() ? reasoning : undefined });
   };
   // Batch deltas; a timer keeps working when the window is in the background, unlike requestAnimationFrame.
   const schedule = () => {
@@ -208,18 +208,18 @@ export async function speak(opts: { chat: string; agent: Agent; system: string; 
     done = true;
     patchMessage(
       id,
-      { text, reasoning: reasoning || undefined, status: undefined, usage: { model: target.modelId, input: r.input, output: r.output, seconds: r.seconds } },
+      { text, reasoning: reasoning.trim() ? reasoning : undefined, status: undefined, usage: { model: target.modelId, input: r.input, output: r.output, seconds: r.seconds } },
       true,
     );
     return { ok: true, text, tokens: r.input + r.output, messageId: id };
   } catch (e) {
     done = true;
-    if (opts.signal.aborted) patchMessage(id, { text, reasoning: reasoning || undefined, status: "stopped" }, true);
+    if (opts.signal.aborted) patchMessage(id, { text, reasoning: reasoning.trim() ? reasoning : undefined, status: "stopped" }, true);
     else {
       const error = describeError(e);
       // Text-only models usually reject image parts with a 400; say so plainly.
       if (sendsImages(opts.messages) && /请求被拒绝|找不到/.test(error.message)) error.message = "这个模型可能不支持图片，换一个能识图的模型试试";
-      patchMessage(id, { text, reasoning: reasoning || undefined, status: "error", error }, true);
+      patchMessage(id, { text, reasoning: reasoning.trim() ? reasoning : undefined, status: "error", error }, true);
     }
     return { ok: false, text, tokens: 0, messageId: id };
   }
