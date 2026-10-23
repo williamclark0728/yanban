@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { presets, fromPreset } from "./lib/catalog";
 import { addExamples, db, ensureSeeded, getKv, setKv } from "./lib/db";
-import type { Agent, ChatRef, Group, Message, ModelRef, Provider, Run, SearchConfig } from "./types";
+import type { Agent, ChatRef, Group, Message, ModelRef, Provider, Run, SearchConfig, TeamTemplate } from "./types";
 
 export type Theme = "dark" | "light" | "system";
 export type PanelTab = "info" | "members" | "runs" | "memory";
@@ -39,7 +39,11 @@ interface Ui {
   settingsOpen: boolean;
   settingsTab: SettingsTab;
   editProvider: string | null;
-  editor: { kind: "agent" | "group"; id?: string } | null;
+  /**
+   * The open editor. "templates" picks a team template; "template" edits one of the user's templates;
+   * "saveTemplate" saves group `id` as a template.
+   */
+  editor: { kind: "agent" | "group" | "templates" | "template" | "saveTemplate"; id?: string } | null;
   search: string;
   edit: (editor: Ui["editor"]) => void;
   open: (chat: ChatRef) => void;
@@ -87,6 +91,10 @@ interface Data {
   /** Web search service and keys, kept in this browser like provider keys. */
   search: SearchConfig;
   saveSearch: (c: SearchConfig) => void;
+  /** Team templates the user saved; the built-in ones live in lib/templates. */
+  templates: TeamTemplate[];
+  saveTemplate: (t: TeamTemplate) => void;
+  deleteTemplate: (id: string) => void;
   /** The site's own web search, when the server offers it. */
   siteSearch: { limit: number; remaining: number } | null;
   refreshSiteSearch: () => Promise<void>;
@@ -152,10 +160,11 @@ export const useData = create<Data>()((set, get) => ({
   trial: null,
   search: { provider: "bocha", keys: {} },
   siteSearch: null,
+  templates: [],
 
   load: async () => {
     await ensureSeeded();
-    const [agents, groups, messages, runs, providers, defaultModel, search] = await Promise.all([
+    const [agents, groups, messages, runs, providers, defaultModel, search, templates] = await Promise.all([
       db.agents.toArray(),
       db.groups.toArray(),
       db.messages.orderBy("at").toArray(),
@@ -163,11 +172,12 @@ export const useData = create<Data>()((set, get) => ({
       db.providers.toArray(),
       getKv<ModelRef | null>("defaultModel", null),
       getKv<SearchConfig>("search", { provider: "bocha", keys: {} }),
+      getKv<TeamTemplate[]>("templates", []),
     ]);
     // A reply that was streaming when the page closed ends as stopped.
     const fixed = messages.map((m) => (m.kind === "text" && m.status === "streaming" ? { ...m, status: "stopped" as const } : m));
     const trial = get().trial;
-    set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(trial ? [...providers, trialProvider(trial)] : providers), defaultModel, search });
+    set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(trial ? [...providers, trialProvider(trial)] : providers), defaultModel, search, templates });
     void get().refreshTrial();
     void get().refreshSiteSearch();
   },
@@ -197,6 +207,18 @@ export const useData = create<Data>()((set, get) => ({
       const rest = s.providers.filter((p) => p.id !== TRIAL_ID);
       return { trial, providers: sortProviders(trial ? [...rest, trialProvider(trial)] : rest) };
     });
+  },
+
+  saveTemplate: (t) => {
+    const templates = [...get().templates.filter((x) => x.id !== t.id), t].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+    set({ templates });
+    void setKv("templates", templates);
+  },
+
+  deleteTemplate: (id) => {
+    const templates = get().templates.filter((t) => t.id !== id);
+    set({ templates });
+    void setKv("templates", templates);
   },
 
   saveSearch: (search) => {

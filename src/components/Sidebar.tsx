@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { Bot, Plus, Search, Settings, Users, X } from "lucide-react";
+import { Bot, LayoutTemplate, Plus, Search, Settings, Users, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { listTime } from "../lib/time";
 import { useData, usePrefs, useUi } from "../store";
@@ -80,9 +80,10 @@ export function Sidebar() {
               {menu && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} />
-                  <div className="rise absolute right-0 top-11 z-20 w-44 rounded-2xl border border-line bg-raise p-1.5 shadow-[var(--shadow)]">
+                  <div className="rise absolute right-0 top-11 z-20 w-48 rounded-2xl border border-line bg-raise p-1.5 shadow-[var(--shadow)]">
                     <MenuItem icon={<Bot size={16} />} label="新建智能体" onClick={() => { setMenu(false); edit({ kind: "agent" }); }} />
                     <MenuItem icon={<Users size={16} />} label="新建群聊" onClick={() => { setMenu(false); edit({ kind: "group" }); }} />
+                    <MenuItem icon={<LayoutTemplate size={16} />} label="从模板新建群聊" onClick={() => { setMenu(false); edit({ kind: "templates" }); }} />
                   </div>
                 </>
               )}

@@ -15,6 +15,7 @@
 - `src/lib/chat.ts`：系统提示（四要素、记忆、当前日期）、上下文组装（附件、图片、群聊记录 `transcript`）、`speak`（流式发言写进消息）、私聊
 - `src/lib/collab.ts`：群聊入口 `sendToGroup`、@ 回复、`collaborate`（分工 → 产出 / 修订 → 审查 → `judge` → 交付）、`runBaseline`（单 Agent 对照）、`acceptance`（接受率）；`dispatchTools`（私聊里主持人把任务派到群，等交付后返回结果）
 - `src/lib/tools.ts`、`src/lib/search.ts`：`web_search` 和 `read_page` 工具，搜索服务配置在 设置 → 联网搜索；每次工具调用写进消息的 `tools` 字段，界面显示为步骤和来源。工具都在浏览器里执行，网络请求走 `/api/relay`
+- `src/lib/templates.ts`、`src/components/Templates.tsx`：团队模板。内置模板的成员取自 `seed.ts`（管家、主笔、核查员、审稿人）加上调研员、策划；按模板建群时同名智能体直接复用；用户的模板存在 kv `templates`。协作引擎的产出成员是并行的，所以每个模板只放一位产出成员，其余做审查
 - `src/lib/files.ts`：附件读取；`src/lib/export.ts`：记录导出
 - `src/store.ts`：Zustand store，所有写操作都同步写入 IndexedDB；`resolveModel` 决定每个智能体实际用哪个模型
 - `relay/handler.ts`：开发环境和 Cloudflare 共用的转发逻辑

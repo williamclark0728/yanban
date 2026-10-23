@@ -1,10 +1,11 @@
 import clsx from "clsx";
-import { Check, X } from "lucide-react";
+import { Check, LayoutTemplate, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { resolveModel, useData, useUi } from "../store";
 import type { Agent, AgentColor, Group, RoleCard } from "../types";
 import { BotAvatar, palette } from "./Avatar";
 import { ModelPicker } from "./ModelPicker";
+import { SaveTemplate, TemplateEditor, TemplatePicker } from "./Templates";
 import { IconButton } from "./ui";
 
 export function Editors() {
@@ -18,10 +19,21 @@ export function Editors() {
   }, [editor, edit]);
   if (!editor) return null;
   const close = () => edit(null);
-  return editor.kind === "agent" ? <AgentEditor key={editor.id ?? "new"} id={editor.id} onClose={close} /> : <GroupEditor key={editor.id ?? "new"} id={editor.id} onClose={close} />;
+  switch (editor.kind) {
+    case "agent":
+      return <AgentEditor key={editor.id ?? "new"} id={editor.id} onClose={close} />;
+    case "group":
+      return <GroupEditor key={editor.id ?? "new"} id={editor.id} onClose={close} />;
+    case "templates":
+      return <TemplatePicker onClose={close} />;
+    case "template":
+      return <TemplateEditor key={editor.id} id={editor.id!} onClose={close} />;
+    case "saveTemplate":
+      return <SaveTemplate key={editor.id} groupId={editor.id!} onClose={close} />;
+  }
 }
 
-function Modal({ title, onClose, footer, children }: { title: string; onClose: () => void; footer: ReactNode; children: ReactNode }) {
+export function Modal({ title, onClose, footer, children }: { title: string; onClose: () => void; footer: ReactNode; children: ReactNode }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-[var(--scrim)] md:p-6" onClick={onClose}>
       <div
@@ -41,9 +53,9 @@ function Modal({ title, onClose, footer, children }: { title: string; onClose: (
   );
 }
 
-const inputCls = "w-full rounded-xl border border-line bg-bg px-3.5 text-[15px] outline-none placeholder:text-fg-3 focus:border-accent";
+export const inputCls = "w-full rounded-xl border border-line bg-bg px-3.5 text-[15px] outline-none placeholder:text-fg-3 focus:border-accent";
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <label className="block">
       <div className="mb-1.5 text-sm font-medium">{label}</div>
@@ -67,7 +79,7 @@ export function DangerButton({ label, onConfirm }: { label: string; onConfirm: (
   );
 }
 
-function Actions({ onCancel, onSave, saveLabel, disabled }: { onCancel: () => void; onSave: () => void; saveLabel: string; disabled: boolean }) {
+export function Actions({ onCancel, onSave, saveLabel, disabled }: { onCancel: () => void; onSave: () => void; saveLabel: string; disabled: boolean }) {
   return (
     <>
       <div className="flex-1" />
@@ -254,6 +266,7 @@ function AgentEditor({ id, onClose }: { id?: string; onClose: () => void }) {
 function GroupEditor({ id, onClose }: { id?: string; onClose: () => void }) {
   const { agents, groups, addGroup, updateGroup, deleteGroup } = useData();
   const open = useUi((s) => s.open);
+  const edit = useUi((s) => s.edit);
   const existing = groups.find((g) => g.id === id);
   const [draft, setDraft] = useState<Group>(
     existing ?? {
@@ -306,6 +319,19 @@ function GroupEditor({ id, onClose }: { id?: string; onClose: () => void }) {
       }
     >
       <div className="space-y-5">
+        {!existing && (
+          <button
+            type="button"
+            onClick={() => edit({ kind: "templates" })}
+            className="flex w-full items-center gap-3 rounded-2xl bg-accent-soft px-4 py-3 text-left text-accent-text hover:opacity-90"
+          >
+            <LayoutTemplate size={18} className="shrink-0" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium">从模板创建</span>
+              <span className="block text-[13px] opacity-80">论文写作、资料调研、写作、PPT 制作，或你存的模板</span>
+            </span>
+          </button>
+        )}
         <Field label="群名称">
           <input className={clsx(inputCls, "h-11")} maxLength={20} value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} placeholder="比如：论文写作组" />
         </Field>

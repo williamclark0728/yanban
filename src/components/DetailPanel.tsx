@@ -1,4 +1,4 @@
-import { ChevronRight, Minus, Pencil, Plus, X } from "lucide-react";
+import { ChevronRight, LayoutTemplate, Minus, Pencil, Plus, X } from "lucide-react";
 import { useState } from "react";
 import { resolveModel, usePrefs, useData, useUi, type PanelTab } from "../store";
 import { ModelPicker } from "./ModelPicker";
@@ -41,13 +41,24 @@ export function DetailPanel() {
           {group ? <GroupAvatar members={members} size={84} /> : <BotAvatar agent={agent!} size={84} />}
           <h2 className="mt-3 text-xl font-semibold">{group?.name ?? agent!.name}</h2>
           <p className="mt-1 text-sm text-fg-3">{group ? `${members.length} 位智能体 · 由${nameOf(agents, group.leadId)}主持` : agent!.tagline}</p>
-          <button
-            type="button"
-            onClick={() => edit(group ? { kind: "group", id: group.id } : { kind: "agent", id: agent!.id })}
-            className="mt-3 flex items-center gap-1.5 rounded-full bg-raise-2 px-3.5 py-1.5 text-[13px] font-medium hover:bg-active"
-          >
-            <Pencil size={13} /> {group ? "编辑群聊" : "编辑资料"}
-          </button>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={() => edit(group ? { kind: "group", id: group.id } : { kind: "agent", id: agent!.id })}
+              className="flex items-center gap-1.5 rounded-full bg-raise-2 px-3.5 py-1.5 text-[13px] font-medium hover:bg-active"
+            >
+              <Pencil size={13} /> {group ? "编辑群聊" : "编辑资料"}
+            </button>
+            {group && (
+              <button
+                type="button"
+                onClick={() => edit({ kind: "saveTemplate", id: group.id })}
+                className="flex items-center gap-1.5 rounded-full bg-raise-2 px-3.5 py-1.5 text-[13px] font-medium hover:bg-active"
+              >
+                <LayoutTemplate size={13} /> 存为模板
+              </button>
+            )}
+          </div>
         </div>
         <div className="mt-5">
           <Tabs value={tab} tabs={tabs} onChange={showPanel} />

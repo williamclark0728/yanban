@@ -44,6 +44,33 @@ export interface Group {
 
 export type ChatRef = { kind: "agent" | "group"; id: string };
 
+/** One member of a team template: an agent's settings, without its id. */
+export interface TemplateMember {
+  key: string;
+  name: string;
+  color: AgentColor;
+  look: number;
+  tagline: string;
+  role: RoleCard;
+  params?: Partial<ModelParams>;
+  model?: ModelRef | null;
+  memory?: string[];
+  web?: boolean;
+}
+
+export interface TeamTemplate {
+  id: string;
+  name: string;
+  description: string;
+  members: TemplateMember[];
+  leadKey: string;
+  maxRounds: number;
+  consensus: Group["consensus"];
+  /** Built-in templates ship with the app and cannot be edited. */
+  builtIn?: boolean;
+  createdAt?: number;
+}
+
 export type IssueStatus = "holds" | "rejected" | "unsure";
 
 export interface Issue {
