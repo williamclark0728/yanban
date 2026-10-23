@@ -68,3 +68,7 @@ relay/handler.ts         请求转发
 functions/api/relay.ts   Cloudflare Pages Function 入口
 scripts/                 文案检查、本机模拟模型服务
 ```
+
+## 许可证
+
+MIT。`public/pdfjs/` 下的字符映射表和字体来自 pdf.js，许可证见该目录内的 LICENSE 文件。
