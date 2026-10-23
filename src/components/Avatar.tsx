@@ -1,3 +1,4 @@
+import { usePrefs } from "../store";
 import type { Agent, AgentColor } from "../types";
 
 export const palette: Record<AgentColor, { body: string; eye: string; text: string }> = {
@@ -45,7 +46,7 @@ export function GroupAvatar({ members, size = 48 }: { members: Agent[]; size?: n
         className="absolute rounded-full bg-raise-2 text-[9px] font-semibold text-fg-2 grid place-items-center"
         style={{ width: s * 0.82, height: s * 0.82, left: 2, top: 2, fontSize: s * 0.36 }}
       >
-        {size >= 40 && "致"}
+        {size >= 40 && <MeInitial />}
       </div>
       {shown.map((m, i) => (
         <div key={m.id} className="absolute rounded-full" style={{ ...spots[i], width: s, height: s }}>
@@ -56,13 +57,28 @@ export function GroupAvatar({ members, size = 48 }: { members: Agent[]; size?: n
   );
 }
 
+/** Two characters for the user's avatar: the given name for Chinese names, initials otherwise. */
+export function initials(name: string) {
+  const chars = Array.from(name.trim());
+  if (!chars.length) return "我";
+  if (/\p{Script=Han}/u.test(name)) return (chars.length >= 3 ? chars.slice(-2) : chars.slice(0, 2)).join("");
+  const words = name.trim().split(/\s+/);
+  return (words.length > 1 ? words[0][0] + words[1][0] : chars.slice(0, 2).join("")).toUpperCase();
+}
+
+function MeInitial() {
+  const name = usePrefs((s) => s.name);
+  return Array.from(initials(name))[0];
+}
+
 export function MeAvatar({ size = 32 }: { size?: number }) {
+  const name = usePrefs((s) => s.name);
   return (
     <div
       className="grid shrink-0 place-items-center rounded-full bg-raise-2 font-semibold text-fg-2"
       style={{ width: size, height: size, fontSize: size * 0.36 }}
     >
-      致远
+      {initials(name)}
     </div>
   );
 }

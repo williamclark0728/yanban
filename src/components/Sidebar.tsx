@@ -11,6 +11,7 @@ export function Sidebar() {
   const { agents, groups, messages, unread } = useData();
   const { active, open, search, setSearch, openSettings, edit } = useUi();
   const mode = usePrefs((s) => s.mode);
+  const name = usePrefs((s) => s.name.trim());
   const [searching, setSearching] = useState(false);
   const [menu, setMenu] = useState(false);
 
@@ -137,7 +138,7 @@ export function Sidebar() {
           className="flex min-w-0 flex-1 items-center gap-2.5 rounded-full py-1 pl-1 pr-3 hover:bg-hover"
         >
           <MeAvatar size={34} />
-          <span className="truncate font-medium">盛致远</span>
+          <span className={clsx("truncate", name ? "font-medium" : "text-fg-3")}>{name || "设置昵称"}</span>
         </button>
         <IconButton aria-label="设置" onClick={() => openSettings()}>
           <Settings size={18} />

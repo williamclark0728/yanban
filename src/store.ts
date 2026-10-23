@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { presets, fromPreset } from "./lib/catalog";
-import { db, ensureSeeded, getKv, setKv } from "./lib/db";
+import { addExamples, db, ensureSeeded, getKv, setKv } from "./lib/db";
 import type { Agent, ChatRef, Group, Message, ModelRef, Provider, Run } from "./types";
 
 export type Theme = "dark" | "light" | "system";
@@ -11,8 +11,11 @@ export type SettingsTab = "general" | "providers";
 interface Prefs {
   mode: "simple" | "dev";
   theme: Theme;
+  /** What the user wants to be called; empty until they set it. */
+  name: string;
   setMode: (mode: Prefs["mode"]) => void;
   setTheme: (theme: Theme) => void;
+  setName: (name: string) => void;
 }
 
 export const usePrefs = create<Prefs>()(
@@ -20,8 +23,10 @@ export const usePrefs = create<Prefs>()(
     (set) => ({
       mode: "simple",
       theme: "dark",
+      name: "",
       setMode: (mode) => set({ mode }),
       setTheme: (theme) => set({ theme }),
+      setName: (name) => set({ name: name.slice(0, 20) }),
     }),
     { name: "yanban.prefs" },
   ),
@@ -78,6 +83,7 @@ interface Data {
   defaultModel: ModelRef | null;
   unread: Record<string, number>;
   load: () => Promise<void>;
+  restoreExamples: () => Promise<void>;
   saveProvider: (p: Provider) => Promise<void>;
   removeProvider: (id: string) => Promise<void>;
   setDefaultModel: (ref: ModelRef | null) => void;
@@ -125,6 +131,11 @@ export const useData = create<Data>()((set, get) => ({
     // A reply that was streaming when the page closed ends as stopped.
     const fixed = messages.map((m) => (m.kind === "text" && m.status === "streaming" ? { ...m, status: "stopped" as const } : m));
     set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(providers), defaultModel });
+  },
+
+  restoreExamples: async () => {
+    await addExamples();
+    await get().load();
   },
 
   saveProvider: async (p) => {

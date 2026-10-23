@@ -5,6 +5,8 @@ import { protocols } from "../lib/catalog";
 import { describeError, listModels, testProvider } from "../lib/llm";
 import { isReady, resolveModel, useData, usePrefs, useUi, type SettingsTab } from "../store";
 import type { Provider } from "../types";
+import { seedAgents, seedGroups } from "../lib/seed";
+import { MeAvatar } from "./Avatar";
 import { ModelPicker } from "./ModelPicker";
 import { IconButton, Segmented } from "./ui";
 
@@ -93,9 +95,26 @@ function Row({ title, desc, children }: { title: string; desc?: string; children
 }
 
 function General() {
-  const { mode, setMode, theme, setTheme } = usePrefs();
+  const { mode, setMode, theme, setTheme, name, setName } = usePrefs();
+  const { agents, groups, restoreExamples } = useData();
+  const [restoring, setRestoring] = useState(false);
+  const missing =
+    seedAgents.filter((a) => !agents.some((x) => x.id === a.id)).length + seedGroups.filter((g) => !groups.some((x) => x.id === g.id)).length;
   return (
     <div className="divide-y divide-line rounded-2xl border border-line bg-raise">
+      <Row title="昵称" desc="显示在左下角，智能体会这样称呼你">
+        <div className="flex w-full items-center gap-3 sm:w-64">
+          <MeAvatar size={40} />
+          <input
+            className={inputCls}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="怎么称呼你"
+            autoFocus={!name}
+            maxLength={20}
+          />
+        </div>
+      </Row>
       <Row title="界面模式" desc={mode === "simple" ? "只保留聊天和协作，参数自动设置" : "显示生成参数、Token 用量和每一步的耗时"}>
         <Segmented
           value={mode}
@@ -116,6 +135,20 @@ function General() {
             { value: "system", label: "跟随系统" },
           ]}
         />
+      </Row>
+      <Row title="示例" desc={`论文写作组，以及${seedAgents.map((a) => a.name).join("、")}`}>
+        <button
+          type="button"
+          disabled={!missing || restoring}
+          onClick={async () => {
+            setRestoring(true);
+            await restoreExamples();
+            setRestoring(false);
+          }}
+          className="h-10 rounded-full border border-line-2 px-5 text-sm font-medium hover:bg-hover disabled:opacity-50 disabled:hover:bg-transparent"
+        >
+          {missing ? `添加回来（${missing} 个）` : "都在列表里"}
+        </button>
       </Row>
     </div>
   );

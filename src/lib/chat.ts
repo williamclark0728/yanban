@@ -1,6 +1,6 @@
 import type { ImagePart, ModelMessage, UserContent } from "ai";
 import { create } from "zustand";
-import { resolveModel, useData } from "../store";
+import { resolveModel, useData, usePrefs } from "../store";
 import type { Agent, Attachment, Group, Issue, Message, TextMessage } from "../types";
 import { attachmentText, hasImages } from "./files";
 import { describeError, streamReply } from "./llm";
@@ -37,6 +37,8 @@ export function systemPrompt(agent: Agent) {
     agent.role.scope && `能力边界：${agent.role.scope}`,
     agent.role.io && `输入输出：${agent.role.io}`,
   ].filter(Boolean) as string[];
+  const me = usePrefs.getState().name.trim();
+  if (me) lines.push(`用户的称呼：${me}`);
   if (agent.memory.length) lines.push("", "关于用户你已经知道：", ...agent.memory.map((m) => `- ${m}`));
   lines.push("", `现在是${now()}。`, "用用户的语言回答，回答直接、具体。");
   return lines.join("\n");

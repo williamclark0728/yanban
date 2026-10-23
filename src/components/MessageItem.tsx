@@ -9,10 +9,9 @@ import type { Agent, Issue, Message, Usage, Verdict } from "../types";
 import { BotAvatar, palette } from "./Avatar";
 import { FileCard } from "./FileCard";
 
-const MENTION_ME = "致远";
-
 function withMentions(text: string, agents: Agent[]) {
-  const names = [...agents.map((a) => a.name), MENTION_ME].sort((a, b) => b.length - a.length);
+  const me = usePrefs.getState().name.trim();
+  const names = [...agents.map((a) => a.name), ...(me ? [me] : [])].sort((a, b) => b.length - a.length);
   const re = new RegExp(`@(${names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "g");
   return text.replace(re, (_, name: string) => {
     const id = agents.find((a) => a.name === name)?.id ?? "me";

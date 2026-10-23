@@ -33,17 +33,31 @@ export async function getKv<T>(key: string, fallback: T): Promise<T> {
 
 export const setKv = (key: string, value: unknown) => db.kv.put({ key, value });
 
-/** First launch fills in the agents, the example group and the provider catalog. */
+/**
+ * Adds whichever example agents and groups are missing, without touching ones the user changed.
+ * A restored group comes back with its example run so its page shows how a collaboration looks.
+ */
+export async function addExamples() {
+  await db.transaction("rw", [db.agents, db.groups, db.messages, db.runs], async () => {
+    const agentIds = new Set(await db.agents.toCollection().primaryKeys());
+    const groupIds = new Set(await db.groups.toCollection().primaryKeys());
+    const groups = seedGroups.filter((g) => !groupIds.has(g.id));
+    const { messages, runs } = seedMessages(Date.now());
+    await db.agents.bulkAdd(seedAgents.filter((a) => !agentIds.has(a.id)));
+    await db.groups.bulkAdd(groups);
+    const restored = new Set(groups.map((g) => g.id));
+    await db.messages.bulkPut(messages.filter((m) => restored.has(m.chat)));
+    await db.runs.bulkPut(runs.filter((r) => restored.has(r.groupId)));
+  });
+}
+
+/** First launch fills in the example agents and group, and the provider catalog. */
 export async function ensureSeeded() {
-  await db.transaction("rw", [db.providers, db.agents, db.groups, db.messages, db.runs, db.kv], async () => {
-    if (!(await getKv("seeded", false))) {
-      const { messages, runs } = seedMessages(Date.now());
-      await db.agents.bulkPut(seedAgents);
-      await db.groups.bulkPut(seedGroups);
-      await db.messages.bulkPut(messages);
-      await db.runs.bulkPut(runs);
-      await setKv("seeded", true);
-    }
+  if (!(await getKv("seeded", false))) {
+    await addExamples();
+    await setKv("seeded", true);
+  }
+  await db.transaction("rw", [db.providers], async () => {
     // New presets added in later versions show up without touching saved ones.
     const known = new Set(await db.providers.toCollection().primaryKeys());
     await db.providers.bulkAdd(presets.filter((p) => !known.has(p.id)).map(fromPreset));
