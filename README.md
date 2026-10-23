@@ -44,7 +44,7 @@ npm run dev
 | --- | --- |
 | 构建命令 | `npm run build` |
 | 输出目录 | `dist` |
-| Node 版本 | 环境变量 `NODE_VERSION` = `22` |
+| Node 版本 | 由仓库里的 `.node-version` 指定（22），不用另设 |
 
 `functions/` 目录会自动部署为 Pages Functions。部署完成后在“自定义域”里绑定域名。
 
