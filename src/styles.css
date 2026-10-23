@@ -1,0 +1,192 @@
+@import "tailwindcss";
+
+/* Design tokens. Dark is the default; light mirrors it. */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e0e10;
+  --sidebar: #151517;
+  --panel: #151517;
+  --raise: #1d1d20;
+  --raise-2: #26262a;
+  --hover: rgb(255 255 255 / 0.045);
+  --active: rgb(255 255 255 / 0.075);
+  --bubble: #232327;
+  --bubble-me: #36363c;
+  --line: rgb(255 255 255 / 0.07);
+  --line-2: rgb(255 255 255 / 0.12);
+  --text: #ececef;
+  --text-2: #a3a3ad;
+  --text-3: #6f6f79;
+  --accent: #8b6cff;
+  --accent-text: #b4a2ff;
+  --accent-soft: rgb(139 108 255 / 0.16);
+  --badge: #4a8dff;
+  --ok: #3fcf8e;
+  --ok-soft: rgb(63 207 142 / 0.14);
+  --warn: #f5b13d;
+  --warn-soft: rgb(245 177 61 / 0.14);
+  --bad: #ff6b6b;
+  --bad-soft: rgb(255 107 107 / 0.14);
+  --scrim: rgb(0 0 0 / 0.55);
+  --shadow: 0 12px 40px rgb(0 0 0 / 0.45);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --sidebar: #f5f5f7;
+  --panel: #f7f7f9;
+  --raise: #ffffff;
+  --raise-2: #ececf0;
+  --hover: rgb(0 0 0 / 0.04);
+  --active: rgb(0 0 0 / 0.065);
+  --bubble: #f0f0f3;
+  --bubble-me: #e3e1fb;
+  --line: rgb(0 0 0 / 0.07);
+  --line-2: rgb(0 0 0 / 0.12);
+  --text: #18181b;
+  --text-2: #5d5d66;
+  --text-3: #92929c;
+  --accent: #6f4dff;
+  --accent-text: #5b3df0;
+  --accent-soft: rgb(111 77 255 / 0.1);
+  --badge: #3478f6;
+  --ok: #17a868;
+  --ok-soft: rgb(23 168 104 / 0.1);
+  --warn: #d48806;
+  --warn-soft: rgb(212 136 6 / 0.1);
+  --bad: #e5484d;
+  --bad-soft: rgb(229 72 77 / 0.1);
+  --scrim: rgb(0 0 0 / 0.3);
+  --shadow: 0 12px 40px rgb(0 0 0 / 0.12);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-sidebar: var(--sidebar);
+  --color-panel: var(--panel);
+  --color-raise: var(--raise);
+  --color-raise-2: var(--raise-2);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-bubble: var(--bubble);
+  --color-bubble-me: var(--bubble-me);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-fg: var(--text);
+  --color-fg-2: var(--text-2);
+  --color-fg-3: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
+  --color-accent-soft: var(--accent-soft);
+  --color-badge: var(--badge);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  cursor: pointer;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+/* Thin scrollbars that only show on hover. */
+.scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.scroll:hover {
+  scrollbar-color: var(--line-2) transparent;
+}
+
+/* Markdown inside bubbles. */
+.prose-chat {
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.prose-chat > * + * {
+  margin-top: 0.55em;
+}
+.prose-chat ul,
+.prose-chat ol {
+  padding-left: 1.3em;
+}
+.prose-chat ul {
+  list-style: disc;
+}
+.prose-chat ol {
+  list-style: decimal;
+}
+.prose-chat li + li {
+  margin-top: 0.2em;
+}
+.prose-chat strong {
+  font-weight: 650;
+}
+.prose-chat blockquote {
+  border-left: 3px solid var(--line-2);
+  padding-left: 0.75em;
+  color: var(--text-2);
+}
+.prose-chat code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--active);
+  padding: 0.1em 0.35em;
+  border-radius: 6px;
+}
+.prose-chat pre {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.75em 1em;
+  overflow-x: auto;
+}
+.prose-chat pre code {
+  background: none;
+  padding: 0;
+}
+.prose-chat a {
+  color: var(--accent-text);
+}
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+  font-weight: 650;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.rise {
+  animation: rise 0.18s ease-out;
+}
