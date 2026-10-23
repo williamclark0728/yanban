@@ -26,6 +26,17 @@ createServer(async (req, res) => {
       results: [1, 2, 3].map((i) => ({ title: `${q} · 结果 ${i}`, url: `https://example.com/${i}`, content: `关于「${q}」的第 ${i} 条摘要。`, publishedDate: "2026-10-2" + i })),
     }));
   }
+  // Tavily-style search, for the site search endpoint (SEARCH_TAVILY_URL=http://127.0.0.1:5199/tavily/search)
+  if (req.url === "/tavily/search" && req.method === "POST") {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const q = JSON.parse(raw).query ?? "";
+    res.writeHead(200, { ...cors, "content-type": "application/json" });
+    return res.end(JSON.stringify({
+      query: q,
+      results: [1, 2].map((i) => ({ title: `${q} · 站内搜索 ${i}`, url: `https://example.net/${i}`, content: `「${q}」的第 ${i} 条结果。`, published_date: "2026-10-23" })),
+    }));
+  }
   if (req.url !== "/v1/chat/completions" || req.method !== "POST") return res.writeHead(404, cors).end();
 
   let body = "";

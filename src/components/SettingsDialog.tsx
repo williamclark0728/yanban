@@ -321,7 +321,7 @@ function SecretInput({ value, onChange, placeholder }: { value: string; onChange
 }
 
 function SearchSettings() {
-  const { search, saveSearch, agents } = useData();
+  const { search, saveSearch, agents, siteSearch } = useData();
   const [draft, setDraft] = useState<SearchConfig>(search);
   const [status, setStatus] = useState<Status>(null);
   const meta = searchProviders.find((p) => p.value === draft.provider)!;
@@ -351,6 +351,23 @@ function SearchSettings() {
         连接搜索服务后，在智能体资料里打开「联网搜索」，它就能搜网页、读原文，回答里标注来源。
         {webAgents.length > 0 && ` 已开启：${webAgents.map((a) => a.name).join("、")}。`}
       </p>
+      {siteSearch && (
+        <div>
+          <div className="flex items-center gap-3 rounded-2xl border border-line bg-raise px-4 py-3">
+            <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent-text">
+              <Globe size={18} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">本站提供的搜索</div>
+              <div className="text-[13px] text-fg-3">
+                不用填 Key，每天 {siteSearch.limit} 次，今天还剩 {siteSearch.remaining} 次
+              </div>
+            </div>
+            {searchReady(search) && <span className="shrink-0 text-[13px] text-fg-3">已改用你的服务</span>}
+          </div>
+          <p className="mt-1.5 px-1 text-[13px] text-fg-3">在下面连接自己的搜索服务后，自动改用你的，不受次数限制</p>
+        </div>
+      )}
       <Field label="搜索服务" hint={meta.hint}>
         <Segmented value={draft.provider} onChange={(provider) => set({ provider })} options={searchProviders.map((p) => ({ value: p.value, label: p.label }))} />
       </Field>

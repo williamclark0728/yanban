@@ -170,10 +170,10 @@ function MemberList({ group, members }: { group: Group; members: Agent[] }) {
 }
 
 function AgentInfo({ agent }: { agent: Agent }) {
-  const { providers, defaultModel, setParam, updateAgent, search } = useData();
+  const { providers, defaultModel, setParam, updateAgent, search, siteSearch } = useData();
   const openSettings = useUi((s) => s.openSettings);
   const dev = usePrefs((s) => s.mode === "dev");
-  const searchOk = searchReady(search);
+  const searchOk = searchReady(search) || !!siteSearch;
   const target = resolveModel(agent, providers, defaultModel);
   const fallback = resolveModel(undefined, providers, defaultModel);
   const inherits = !agent.model || !target || target.provider.id !== agent.model.provider;

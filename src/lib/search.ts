@@ -1,3 +1,4 @@
+import { useData } from "../store";
 import type { SearchConfig, SearchProvider, Source } from "../types";
 import { HttpError, proxiedFetch } from "./llm";
 
@@ -11,9 +12,31 @@ export const searchProviders: { value: SearchProvider; label: string; hint: stri
   { value: "searxng", label: "SearXNG", hint: "自建的开源搜索，不需要 Key" },
 ];
 
-/** Whether the chosen provider has what it needs to run. */
+/** Whether the user's own provider has what it needs to run. */
 export const searchReady = (c: SearchConfig | null) =>
   !!c && (c.provider === "searxng" ? !!c.searxngUrl?.trim() : !!c.keys[c.provider]?.trim());
+
+/** Web search works with the user's own service, or else with the site's. */
+export const canSearch = () => {
+  const { search, siteSearch } = useData.getState();
+  return searchReady(search) || !!siteSearch;
+};
+
+/** Searches with the user's own service when it is set up, otherwise with the site's. */
+export function searchWeb(query: string, signal?: AbortSignal) {
+  const { search } = useData.getState();
+  return searchReady(search) ? webSearch(search, query, signal) : siteWebSearch(query, signal);
+}
+
+async function siteWebSearch(query: string, signal?: AbortSignal): Promise<SearchHit[]> {
+  const res = await fetch("/api/search", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query }), signal });
+  const left = res.headers.get("x-search-remaining");
+  if (left !== null) useData.getState().setSiteSearchRemaining(Number(left));
+  else if (res.status === 429) useData.getState().setSiteSearchRemaining(0);
+  const data = await json(res);
+  const items: Record<string, string>[] = data?.results ?? [];
+  return items.map((r) => ({ title: r.title ?? r.url, url: r.url, site: site(r.url), date: r.published_date?.slice(0, 10), snippet: clip(r.content, 600) }));
+}
 
 const MAX_HITS = 8;
 

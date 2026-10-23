@@ -4,6 +4,7 @@ import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { relay } from "./relay/handler";
+import { siteSearch } from "./relay/search";
 import { memoryLimiter, trial } from "./relay/trial";
 
 type Handler = (request: Request, req: IncomingMessage) => Promise<Response>;
@@ -39,8 +40,8 @@ const serve = (handler: Handler) => async (req: IncomingMessage & { originalUrl?
 };
 
 /**
- * Serves /api/relay and /api/trial during development, same contract as the Cloudflare functions.
- * The trial reads TRIAL_* variables from .env.local (for example pointing at scripts/mock-llm.mjs).
+ * Serves /api/relay, /api/trial and /api/search during development, same contract as the Cloudflare functions.
+ * The trial and site search read TRIAL_* and SEARCH_* variables from .env.local (for example pointing at scripts/mock-llm.mjs).
  */
 function devApi(env: Record<string, string>): Plugin {
   const limiter = memoryLimiter();
@@ -49,11 +50,12 @@ function devApi(env: Record<string, string>): Plugin {
     configureServer(server) {
       server.middlewares.use("/api/relay", serve((request) => relay(request)));
       server.middlewares.use("/api/trial", serve((request, req) => trial(request, env, req.socket.remoteAddress ?? "local", limiter)));
+      server.middlewares.use("/api/search", serve((request, req) => siteSearch(request, env, req.socket.remoteAddress ?? "local", limiter)));
     },
   };
 }
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), tailwindcss(), devApi(loadEnv(mode, process.cwd(), "TRIAL_"))],
+  plugins: [react(), tailwindcss(), devApi(loadEnv(mode, process.cwd(), ["TRIAL_", "SEARCH_"]))],
   server: { port: 5180, strictPort: true },
 }));

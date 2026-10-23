@@ -19,6 +19,7 @@
 - `src/store.ts`：Zustand store，所有写操作都同步写入 IndexedDB；`resolveModel` 决定每个智能体实际用哪个模型
 - `relay/handler.ts`：开发环境和 Cloudflare 共用的转发逻辑
 - `relay/trial.ts`：体验模型（`/api/trial`）。服务器端持有额度，按访客每天限次；前端把它当成 id 为 `trial` 的服务，排在用户自己的服务之后，不存进数据库
+- `relay/search.ts`：本站联网搜索（`/api/search`），用站长的 Tavily Key，访客和全站每天限次，和体验模型共用 D1 计数表（访客哈希加了用途前缀，互不影响）；用户自己的搜索服务配好后前端不再调用它
 
 ## 约定
 

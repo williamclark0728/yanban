@@ -87,6 +87,10 @@ interface Data {
   /** Web search service and keys, kept in this browser like provider keys. */
   search: SearchConfig;
   saveSearch: (c: SearchConfig) => void;
+  /** The site's own web search, when the server offers it. */
+  siteSearch: { limit: number; remaining: number } | null;
+  refreshSiteSearch: () => Promise<void>;
+  setSiteSearchRemaining: (remaining: number) => void;
   load: () => Promise<void>;
   refreshTrial: () => Promise<void>;
   setTrialRemaining: (remaining: number) => void;
@@ -147,6 +151,7 @@ export const useData = create<Data>()((set, get) => ({
   unread: {},
   trial: null,
   search: { provider: "bocha", keys: {} },
+  siteSearch: null,
 
   load: async () => {
     await ensureSeeded();
@@ -164,7 +169,20 @@ export const useData = create<Data>()((set, get) => ({
     const trial = get().trial;
     set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(trial ? [...providers, trialProvider(trial)] : providers), defaultModel, search });
     void get().refreshTrial();
+    void get().refreshSiteSearch();
   },
+
+  refreshSiteSearch: async () => {
+    try {
+      const res = await fetch("/api/search/status");
+      const s = res.ok ? await res.json() : null;
+      set({ siteSearch: s?.enabled ? { limit: s.limit, remaining: s.remaining } : null });
+    } catch {
+      set({ siteSearch: null });
+    }
+  },
+
+  setSiteSearchRemaining: (remaining) => set((s) => (s.siteSearch ? { siteSearch: { ...s.siteSearch, remaining } } : {})),
 
   refreshTrial: async () => {
     let trial: Trial | null = null;

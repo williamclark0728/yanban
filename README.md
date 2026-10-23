@@ -56,7 +56,7 @@
 - 智能体：名称、头像颜色、角色四要素（职责、能力边界、输入输出、协作方式）、模型、生成参数、私有记忆。
 - 私聊：流式回复、思考过程、停止和重试，每个智能体的上下文互相独立。群的主持人在私聊里可以把任务派到群里，等群里交付后汇报结果。
 - 群聊：@ 成员单独回复；不 @ 时由主持人分工，“产出 → 审查 → 共识判定 → 修订”多轮循环。
-- 联网搜索：在 设置 → 联网搜索 里连接博查、Tavily 或自建的 SearXNG，再给智能体打开「联网搜索」。读网页全文用 Jina Reader。回答里的 [n] 链接到对应来源。模型不支持工具调用时自动改为直接回答。
+- 联网搜索：给智能体打开「联网搜索」即可用本站提供的搜索（每天限次）；在 设置 → 联网搜索 里连接自己的博查、Tavily 或自建 SearXNG 后不限次。读网页全文用 Jina Reader。回答里的 [n] 链接到对应来源。模型不支持工具调用时自动改为直接回答。
 - 共识规则：严格（成立和存疑都要解决）或宽松（没有成立的疑点即通过），记录里可以对比两种规则的接受率。
 - 协作记录：逐轮留痕，单 Agent 对照（同一任务单独完成，再用同样的标准审查），导出 Markdown 或 JSON。
 - 文件：文本、PDF（含中文）、Word、图片，可以选择文件、拖放或粘贴。
@@ -115,6 +115,18 @@ npm run dev
 
 本机调试：在 `.env.local` 里写 `TRIAL_API_KEY=mock`、`TRIAL_BASE_URL=http://127.0.0.1:5199/v1`、`TRIAL_MODEL=mock-chat`，再运行 `node scripts/mock-llm.mjs` 和 `npm run dev`。
 
+### 本站联网搜索（可选）
+
+让没连接搜索服务的用户也能联网。接口是 `/api/search`（`relay/search.ts`），用站长的 Tavily Key 搜索，Key 只在服务器上。和体验模型共用 `DB` 计数，每个访客每天限次，全站每天也有总数上限，免费额度不会几天就用完。
+
+| 名称 | 类型 | 作用 |
+| --- | --- | --- |
+| `SEARCH_TAVILY_KEY` | 密钥 | Tavily 的 API Key，**必需** |
+| `SEARCH_DAILY` | 文本 | 可选，每个访客每天的搜索次数，默认 10 |
+| `SEARCH_SITE_DAILY` | 文本 | 可选，全站每天的搜索总数，默认 50（Tavily 免费版每月 1000 次） |
+
+用户在 设置 → 联网搜索 里连接了自己的服务后，自动改用自己的。本机调试：`.env.local` 里写 `SEARCH_TAVILY_KEY=mock`、`SEARCH_TAVILY_URL=http://127.0.0.1:5199/tavily/search`。
+
 ## 目录
 
 ```
@@ -134,7 +146,8 @@ src/
   components/            界面组件
 relay/handler.ts         请求转发
 relay/trial.ts           体验模型：后端选择、访客限额、Workers AI 输出转换
-functions/api/           Cloudflare Pages Function 入口（relay、trial）
+relay/search.ts          本站联网搜索：Tavily、访客和全站每日限次
+functions/api/           Cloudflare Pages Function 入口（relay、trial、search）
 scripts/                 文案检查、本机模拟模型服务
 ```
 

@@ -2,7 +2,7 @@ import { jsonSchema, tool, type ToolSet } from "ai";
 import { useData } from "../store";
 import type { Agent, ToolTrace } from "../types";
 import { describeError } from "./llm";
-import { readPage, searchReady, webSearch } from "./search";
+import { canSearch, readPage, searchWeb } from "./search";
 
 /** Adds or updates one tool step on the message being written. */
 export type Report = (t: ToolTrace) => void;
@@ -21,7 +21,7 @@ export function tracer(messageId: string) {
   return { report, halt };
 }
 
-export const webEnabled = (agent: Agent) => !!agent.web && searchReady(useData.getState().search);
+export const webEnabled = (agent: Agent) => !!agent.web && canSearch();
 
 export const WEB_RULES = [
   "你可以联网：web_search 搜索网页，read_page 阅读某个网页的全文。",
@@ -46,7 +46,7 @@ export function webTools(report: Report): ToolSet {
         const base = { id: toolCallId, name: "web_search" as const, label: query };
         report({ ...base, status: "running" });
         try {
-          const hits = await webSearch(useData.getState().search, query, abortSignal);
+          const hits = await searchWeb(query, abortSignal);
           const first = next;
           next += hits.length;
           report({ ...base, status: "done", detail: `${hits.length} 条结果`, sources: hits.map(({ title, url, site, date }) => ({ title, url, site, date })), first });

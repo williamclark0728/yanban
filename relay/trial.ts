@@ -19,7 +19,7 @@ export interface TrialEnv {
 }
 
 /** The slice of Cloudflare D1 used here. */
-interface D1 {
+export interface D1 {
   prepare: (sql: string) => { bind: (...values: unknown[]) => { first: <T>() => Promise<T | null>; run: () => Promise<unknown> }; run: () => Promise<unknown> };
 }
 
@@ -58,10 +58,11 @@ function backends(env: TrialEnv): Backend[] {
 const label = (b: Backend) => b.model.split("/").pop()!;
 
 /** Days roll over at midnight China time. */
-const today = () => new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+export const today = () => new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
 
-async function hashVisitor(ip: string, day: string) {
-  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`yanban-trial|${day}|${ip}`));
+/** `purpose` keeps the trial and search counts apart in the same table. */
+export async function hashVisitor(ip: string, day: string, purpose = "trial") {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`yanban-${purpose}|${day}|${ip}`));
   return [...new Uint8Array(bytes).slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 

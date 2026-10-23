@@ -150,8 +150,8 @@ export function describeError(e: unknown): { message: string; detail?: string } 
   const detail = [status ? `HTTP ${status}` : "", raw || (err as Error)?.message].filter(Boolean).join(" · ");
 
   if ((err as Error)?.name === "AbortError") return { message: "已停止" };
-  // The trial endpoint already words its errors for the user.
-  if (raw.startsWith("体验")) return { message: raw, detail };
+  // The trial and site search endpoints already word their errors for the user.
+  if (/^(体验|联网搜索|本站)/.test(raw)) return { message: raw, detail };
   if (status === 401 || status === 403 || /api.?key.{0,20}(invalid|not valid)/i.test(raw)) return { message: "API Key 无效或没有权限", detail };
   if (status === 404) return { message: "找不到这个模型或接口地址", detail };
   if (status === 429) return { message: "请求太频繁，或账户额度不足", detail };
