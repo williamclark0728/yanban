@@ -187,6 +187,15 @@ async function think(opts: { chat: string; agent: Agent; system: string; message
   }
 }
 
+const plain = (s: string) => stripThink(s).replace(/[\s\p{P}\p{S}]/gu, "");
+
+/** The lead's reply is empty, or just the user's own words again. */
+function echoes(reply: string, said: string) {
+  const r = plain(reply);
+  const u = plain(said);
+  return !r || r === u || (u.length >= 4 && r.includes(u) && r.length <= u.length + 6);
+}
+
 const summarize = (text: string) => {
   const plain = stripThink(text).replace(/[*#>`_]/g, "").replace(/\s+/g, " ").trim();
   return plain.length > 60 ? `${plain.slice(0, 60)}…` : plain;
@@ -352,6 +361,20 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
     const parsed = parsePlan(plan.text, members);
     let assignments = parsed?.assignments ?? [];
     const intro = parsed ? parsed.reply : stripThink(plan.text);
+    if (assignments.length === 0 && echoes(intro, task)) {
+      // Small models sometimes copy the user's message into "reply"; ask once more for a plain answer.
+      useData.getState().removeMessage(plan.messageId);
+      const answer = await speak({
+        chat: group.id,
+        agent: lead,
+        system: groupSystem(lead, group),
+        messages: prompt("这条消息不需要分工。请以主持人的身份直接回复用户，不要复述用户的话。"),
+        signal,
+      });
+      run.status = answer.ok ? "done" : signal.aborted ? "stopped" : "failed";
+      delivered = answer.text;
+      return;
+    }
     const list = assignments.map((a, i) => `${i + 1}. @${a.agent.name}${a.type === "review" ? "（审查）" : ""} ${a.task}`).join("\n");
     patchMessage(
       plan.messageId,
@@ -459,7 +482,7 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
     // 5. Deliver
     const unresolved = open.map((o) => `- ${formatIssue(o.issue)}`).join("\n");
     const instruction = !reviewers.length
-      ? `请汇总以上成员的产出，完成用户的需求：${task}\n先给结论或成品，再简要列出各成员的贡献。没完成的部分如实说明。`
+      ? `请汇总以上成员的产出，完成用户的需求：${task}\n先给结论或成品，再简要列出各成员的贡献。没完成的部分如实说明。如果成员只是各自发言（比如自我介绍），用一两句话收尾即可，不要重复他们说过的内容。`
       : passed
         ? `审查已通过。请把最终成果交付给用户：先给出完整成品（以作者最新一版为准，不要改动已核实的内容，保留其中按用户要求列出的内容），再用几句话说明各成员的结论和修订经过。\n用户的原始需求：「${task}」`
         : `已到最多轮数，审查仍未全部通过。请交付作者最新一版的完整成品，并如实列出仍未解决的疑点：\n${unresolved}\n用户的原始需求：「${task}」`;
