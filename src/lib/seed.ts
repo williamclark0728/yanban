@@ -150,6 +150,8 @@ export function seedMessages(now: number): { messages: Message[]; runs: Run[] } 
       groupId: "lab",
       task: "把压缩模型的实验结果写成 200 字摘要，数字都要核对",
       status: "done",
+      consensus: "strict",
+      maxRounds: 3,
       startedAt: t(0),
       tokens: 20815,
       rounds: [

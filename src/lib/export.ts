@@ -39,7 +39,7 @@ export function runToMarkdown(run: Run) {
     "",
     `- 群聊：${group?.name ?? "已解散"}；主持：${group ? name(group.leadId) : "-"}`,
     `- 开始：${stamp(run.startedAt)}${seconds !== undefined ? `；用时 ${seconds} 秒` : ""}；共 ${run.rounds.length} 轮；Token ${run.tokens.toLocaleString()}`,
-    `- 共识规则：${run.consensus === "relaxed" ? "宽松（没有成立的疑点即通过）" : "严格（成立和存疑都要解决）"}；最多 ${run.maxRounds ?? "-"} 轮`,
+    `- 共识规则：${(run.consensus ?? group?.consensus) === "relaxed" ? "宽松（没有成立的疑点即通过）" : "严格（成立和存疑都要解决）"}；最多 ${run.maxRounds ?? group?.maxRounds ?? "-"} 轮`,
     `- 结果：${{ done: "已完成", running: "进行中", stopped: "已停止", failed: "未完成" }[run.status]}`,
     "",
     "## 用户需求",
