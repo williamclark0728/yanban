@@ -1,5 +1,6 @@
 import clsx from "clsx";
-import { AlertCircle, Brain, CheckCircle2, ChevronDown, RotateCcw, RotateCw, Square } from "lucide-react";
+import { AlertCircle, Brain, Check, CheckCircle2, ChevronDown, Copy, RotateCcw, RotateCw, Square } from "lucide-react";
+import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { retry } from "../lib/chat";
@@ -108,7 +109,28 @@ export function IssueList({ issues }: { issues: Issue[] }) {
   );
 }
 
-function Meta({ time, usage, note, align }: { time: string; usage?: Usage; note?: string; align: "left" | "right" }) {
+/** Copies the reply as written (Markdown), so it can be pasted into a document or an experiment record. */
+function CopyButton({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      title="复制"
+      onClick={() =>
+        navigator.clipboard.writeText(text).then(() => {
+          setDone(true);
+          setTimeout(() => setDone(false), 1500);
+        })
+      }
+      className="flex items-center gap-1 hover:text-fg"
+    >
+      {done ? <Check size={12} /> : <Copy size={12} />}
+      {done ? "已复制" : "复制"}
+    </button>
+  );
+}
+
+function Meta({ time, usage, note, copy, align }: { time: string; usage?: Usage; note?: string; copy?: string; align: "left" | "right" }) {
   const dev = usePrefs((s) => s.mode === "dev");
   return (
     <div
@@ -125,6 +147,7 @@ function Meta({ time, usage, note, align }: { time: string; usage?: Usage; note?
           {usage.model} · {usage.input.toLocaleString()}→{usage.output.toLocaleString()} tok · {usage.seconds}s
         </span>
       )}
+      {copy && <CopyButton text={copy} />}
     </div>
   );
 }
@@ -282,7 +305,7 @@ export function MessageItem({
           </div>
         )}
         {failed && <Failure msg={msg} />}
-        {!streaming && <Meta time={time} usage={msg.usage} note={stopped ? "已停止" : undefined} align="left" />}
+        {!streaming && <Meta time={time} usage={msg.usage} note={stopped ? "已停止" : undefined} copy={msg.text || undefined} align="left" />}
       </div>
     </div>
   );
