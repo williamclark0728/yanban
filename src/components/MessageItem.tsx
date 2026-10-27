@@ -1,14 +1,16 @@
 import clsx from "clsx";
-import { AlertCircle, Brain, Check, CheckCircle2, ChevronDown, Copy, RotateCcw, RotateCw, Square } from "lucide-react";
+import { AlertCircle, Brain, Check, CheckCircle2, ChevronDown, Copy, FileDown, RotateCcw, RotateCw, Square } from "lucide-react";
 import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { retry } from "../lib/chat";
+import { download, replyAsDocx } from "../lib/outputs";
 import { clock } from "../lib/time";
 import { usePrefs, useUi } from "../store";
 import type { Agent, Issue, Message, Usage, Verdict } from "../types";
 import { BotAvatar, palette } from "./Avatar";
 import { FileCard } from "./FileCard";
+import { MadeFiles } from "./MadeFiles";
 import { citations, ToolSteps } from "./ToolSteps";
 
 function withMentions(text: string, agents: Agent[]) {
@@ -130,7 +132,16 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function Meta({ time, usage, note, copy, align }: { time: string; usage?: Usage; note?: string; copy?: string; align: "left" | "right" }) {
+/** Saves the reply as a Word document. */
+function WordButton({ text, name }: { text: string; name: string }) {
+  return (
+    <button type="button" title="下载为 Word" onClick={() => void download(replyAsDocx(text, name))} className="flex items-center gap-1 hover:text-fg">
+      <FileDown size={12} /> Word
+    </button>
+  );
+}
+
+function Meta({ time, usage, note, copy, name, align }: { time: string; usage?: Usage; note?: string; copy?: string; name?: string; align: "left" | "right" }) {
   const dev = usePrefs((s) => s.mode === "dev");
   return (
     <div
@@ -148,6 +159,7 @@ function Meta({ time, usage, note, copy, align }: { time: string; usage?: Usage;
         </span>
       )}
       {copy && <CopyButton text={copy} />}
+      {copy && name && <WordButton text={copy} name={name} />}
     </div>
   );
 }
@@ -304,8 +316,18 @@ export function MessageItem({
             )}
           </div>
         )}
+        {msg.kind === "text" && msg.files?.length ? <MadeFiles files={msg.files} /> : null}
         {failed && <Failure msg={msg} />}
-        {!streaming && <Meta time={time} usage={msg.usage} note={stopped ? "已停止" : undefined} copy={msg.text || undefined} align="left" />}
+        {!streaming && (
+          <Meta
+            time={time}
+            usage={msg.usage}
+            note={stopped ? "已停止" : undefined}
+            copy={msg.text || undefined}
+            name={msg.kind === "text" ? (agent?.name ?? "回复") : undefined}
+            align="left"
+          />
+        )}
       </div>
     </div>
   );

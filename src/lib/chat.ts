@@ -5,6 +5,7 @@ import type { Agent, Attachment, Group, Issue, Message, TextMessage } from "../t
 import { attachmentText, hasImages } from "./files";
 import { dispatchRules, dispatchTools } from "./collab";
 import { describeError, streamReply } from "./llm";
+import { FILE_RULES, fileTools, filesText } from "./outputs";
 import { tracer, WEB_RULES, webEnabled, webTools, type Report } from "./tools";
 
 /** Chats with work in flight. One run per chat; stopping a chat aborts all of its replies. */
@@ -126,7 +127,7 @@ export function privateHistory(messages: Message[], chat: string, limit: number)
   const turns = recent.map<ModelMessage>((m, i) =>
     m.sender === "me"
       ? { role: "user", content: userContent(withFiles(m), i === lastUser ? latestImages([m]) : []) }
-      : { role: "assistant", content: m.text },
+      : { role: "assistant", content: [m.text, filesText(m.files)].filter(Boolean).join("\n\n") },
   );
   while (turns[0]?.role === "assistant") turns.shift();
   return turns;
@@ -148,9 +149,9 @@ export function transcript(chat: string, limit: number, sinceId?: string) {
   const line = (m: Message) => {
     if (m.kind === "round") return `【系统】第 ${m.round} 轮：${m.note}`;
     if (m.kind === "text" && (m.status === "streaming" || m.status === "error")) return null;
-    if (!m.text && !(m.kind === "text" && m.attachments?.length)) return null;
+    if (!m.text && !(m.kind === "text" && (m.attachments?.length || m.files?.length))) return null;
     const who = m.sender === "me" ? "用户" : (agentById(m.sender)?.name ?? m.sender);
-    const body = m.kind === "text" ? withFiles(m) : [m.text, ...m.issues.map((i) => `- ${formatIssue(i)}`)].join("\n");
+    const body = m.kind === "text" ? [withFiles(m), filesText(m.files)].filter(Boolean).join("\n\n") : [m.text, ...m.issues.map((i) => `- ${formatIssue(i)}`)].join("\n");
     return `【${who}】${body}`;
   };
   const lines = [...all.slice(0, start).map(line).filter(Boolean).slice(-limit), ...all.slice(start).map(line).filter(Boolean)];
@@ -177,7 +178,7 @@ interface Spoken {
 
 /**
  * Streams one agent's reply into a chat as a new message.
- * Agents with web access get the search tools; `extraTools` adds more (the lead's dispatch tool).
+ * Every reply can make files; agents with web access get the search tools; `extraTools` adds more (the lead's dispatch tool).
  */
 export async function speak(opts: {
   chat: string;
@@ -198,7 +199,7 @@ export async function speak(opts: {
   }
 
   const { report, halt } = tracer(id);
-  const tools = { ...(webEnabled(opts.agent) ? webTools(report) : {}), ...opts.extraTools?.(report) };
+  const tools = { ...(webEnabled(opts.agent) ? webTools(report) : {}), ...fileTools(id, report), ...opts.extraTools?.(report) };
 
   let text = "";
   let reasoning = "";
@@ -220,11 +221,11 @@ export async function speak(opts: {
     const r = await streamReply({
       provider: target.provider,
       modelId: target.modelId,
-      system: opts.system,
+      system: `${opts.system}\n\n${FILE_RULES}`,
       messages: opts.messages,
       params: opts.agent.params,
       signal: opts.signal,
-      tools: Object.keys(tools).length ? tools : undefined,
+      tools,
       onText: (d) => {
         text += d;
         schedule();

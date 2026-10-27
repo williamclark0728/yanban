@@ -182,7 +182,8 @@ export interface StreamResult {
 
 // Models that rejected tool definitions this session; they are called without tools from then on.
 const noTools = new Set<string>();
-const NO_TOOLS_NOTE = "\n\n（当前模型不支持工具：不能联网搜索，也不能把任务派到群里。用户需要这些时，如实告诉用户。）";
+const NO_TOOLS_NOTE =
+  "\n\n（当前模型不支持工具：不能联网搜索、不能调用 make_file，也不能把任务派到群里。用户需要这些时，如实告诉用户；要文件时把内容直接写在回复里，用户可以把回复下载为 Word。）";
 
 /** A 400-class rejection that mentions tools or functions means the model cannot take tool definitions. */
 function rejectsTools(e: unknown) {

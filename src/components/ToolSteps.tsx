@@ -1,12 +1,20 @@
 import clsx from "clsx";
-import { AlertCircle, ChevronDown, FileText, Globe, Loader2, Search, Users } from "lucide-react";
+import { AlertCircle, ChevronDown, FilePlus2, FileText, Globe, Loader2, Search, Users } from "lucide-react";
 import { useUi } from "../store";
 import type { ToolTrace } from "../types";
 
-const icons = { web_search: Search, read_page: FileText, dispatch_to_group: Users };
+const icons = { web_search: Search, read_page: FileText, dispatch_to_group: Users, make_file: FilePlus2 };
 
 const verb = (t: ToolTrace) =>
-  t.name === "web_search" ? `搜索「${t.label}」` : t.name === "read_page" ? `阅读 ${shortUrl(t.label)}` : t.status === "running" ? `已派到「${t.label}」` : `「${t.label}」`;
+  t.name === "web_search"
+    ? `搜索「${t.label}」`
+    : t.name === "read_page"
+      ? `阅读 ${shortUrl(t.label)}`
+      : t.name === "make_file"
+        ? `生成 ${t.label}`
+        : t.status === "running"
+          ? `已派到「${t.label}」`
+          : `「${t.label}」`;
 
 function shortUrl(url: string) {
   try {

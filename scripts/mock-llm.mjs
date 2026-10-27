@@ -106,9 +106,25 @@ createServer(async (req, res) => {
   let call = null;
   if (lastMsg?.role === "tool") {
     const result = String(lastMsg.content);
-    reply = result.startsWith("[1]") ? `根据搜索结果，${last.slice(0, 20)} 有三条相关信息 [1][2]，其中第三条较新 [3]。` : `群里已经完成：${result.slice(0, 80)}`;
+    reply = result.startsWith("[1]")
+      ? `根据搜索结果，${last.slice(0, 20)} 有三条相关信息 [1][2]，其中第三条较新 [3]。`
+      : result.startsWith("已生成") || result.startsWith("没有生成")
+        ? `${result} 文件附在下面。`
+        : `群里已经完成：${result.slice(0, 80)}`;
   } else if (!system.includes("只输出一个 JSON 对象")) {
-    if (tools.includes("dispatch_to_group") && /交给群|派到群/.test(last)) {
+    // "生成 Word / Excel / PPT" asks for make_file with sample content.
+    const kind = /生成/.test(last) && (/PPT|幻灯片/i.test(last) ? "pptx" : /Excel|表格/i.test(last) ? "xlsx" : /Word|文档/i.test(last) ? "docx" : null);
+    if (kind && tools.includes("make_file")) {
+      call = {
+        name: "make_file",
+        arguments:
+          kind === "docx"
+            ? { format: "docx", name: "实验摘要", markdown: "# 实验摘要\n\n我们提出一种**稀疏压缩**方法，准确率由 71.3% 提升至 73.3%。\n\n## 主要结果\n\n1. 推理速度提升 1.8 倍\n2. 显存降低 60%\n   - 从 16 GB 降到 6.4 GB\n\n| 指标 | 基线 | 本文 |\n| --- | --- | --- |\n| Top-1 | 71.3% | 73.3% |\n| 显存 | 16 GB | 6.4 GB |\n\n> 结果只和一个基线比较。\n\n- [x] 数字已核对\n- [ ] 补充消融实验\n\n```\npython eval.py --sparsity 0.7\n```" }
+            : kind === "xlsx"
+              ? { format: "xlsx", name: "实验数据", sheets: [{ name: "主结果", rows: [["方法", "Top-1 (%)", "显存 (GB)", "编号"], ["基线", "71.3", "16", "007"], ["本文", "73.3", "6.4", "008"]] }, { name: "消融", rows: [["稀疏度", "速度倍数"], ["0.7", "2.9"], ["0.8", "3.4"]] }] }
+              : { format: "pptx", name: "组会汇报", title: "边缘设备上的稀疏压缩", subtitle: "组会汇报 · 2026 年 10 月", slides: [{ title: "研究背景", bullets: ["边缘设备显存有限", "大模型推理慢", "需要免训练的压缩方法"], notes: "先讲为什么要做这件事。" }, { title: "实验结果", bullets: [] }, { title: "主要结果", bullets: ["准确率 71.3% → 73.3%", "速度提升 1.8 倍", "显存降低 60%", "只和一个基线比较"], notes: "强调数字都已核对。" }] },
+      };
+    } else if (tools.includes("dispatch_to_group") && /交给群|派到群/.test(last)) {
       const group = payload.tools.find((t) => t.function.name === "dispatch_to_group").function.parameters.properties.group.enum?.[0];
       call = { name: "dispatch_to_group", arguments: { group, task: last.replace(/交给群|派到群/g, "").trim() } };
     } else if (tools.includes("web_search") && /搜索/.test(last)) {

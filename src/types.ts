@@ -117,7 +117,38 @@ export type TextMessage = Base & {
   tools?: ToolTrace[];
   /** Set on a task the lead brought over from a private chat: that lead's id. */
   via?: string;
+  /** Files the agent made with make_file. */
+  files?: MadeFile[];
 };
+
+export type FileFormat = "md" | "docx" | "xlsx" | "pptx";
+
+export interface Sheet {
+  name: string;
+  rows: (string | number)[][];
+}
+
+export interface Slide {
+  title: string;
+  bullets: string[];
+  notes?: string;
+}
+
+/** A document an agent wrote; the file itself is built in the browser when it is downloaded. */
+export interface MadeFile {
+  id: string;
+  format: FileFormat;
+  /** File name without the extension. */
+  name: string;
+  /** md and docx */
+  markdown?: string;
+  /** xlsx */
+  sheets?: Sheet[];
+  /** pptx: the cover, then one entry per slide. */
+  title?: string;
+  subtitle?: string;
+  slides?: Slide[];
+}
 
 export interface Source {
   title: string;
@@ -128,7 +159,7 @@ export interface Source {
 
 export interface ToolTrace {
   id: string;
-  name: "web_search" | "read_page" | "dispatch_to_group";
+  name: "web_search" | "read_page" | "dispatch_to_group" | "make_file";
   /** One line for the UI, e.g. the search query or the group name. */
   label: string;
   status: "running" | "done" | "error";
