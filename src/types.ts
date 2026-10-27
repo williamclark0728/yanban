@@ -31,6 +31,8 @@ export interface Agent {
   memory: string[];
   /** May search the web and read pages. */
   web?: boolean;
+  /** Desktop work mode: the folder this agent can read, change and run commands in. */
+  workspace?: string;
 }
 
 export interface Group {
@@ -159,10 +161,15 @@ export interface Source {
 
 export interface ToolTrace {
   id: string;
-  name: "web_search" | "read_page" | "dispatch_to_group" | "make_file" | "use_skill" | "mcp";
+  name: "web_search" | "read_page" | "dispatch_to_group" | "make_file" | "use_skill" | "mcp" | LocalTool;
   /** One line for the UI, e.g. the search query or the group name. */
   label: string;
-  status: "running" | "done" | "error";
+  /** "waiting": a local action waits for the user's approval. */
+  status: "running" | "waiting" | "done" | "error";
+  /** What the user is asked to approve. */
+  ask?: { what: string; diff?: DiffLine[]; danger?: string };
+  /** How to undo a file change: the file's earlier content, or null when the change created it. */
+  undo?: { root: string; path: string; before: string | null; undone?: boolean };
   detail?: string;
   sources?: Source[];
   /** Citation number of the first source; later ones count up from it. */
@@ -180,14 +187,25 @@ export interface Skill {
   enabled: boolean;
 }
 
-/** A remote MCP server reached over Streamable HTTP; its tools are offered to every agent. */
+/** An MCP server: remote over Streamable HTTP, or (desktop only) a local process over stdio. Its tools are offered to every agent. */
 export interface McpServer {
   id: string;
   name: string;
+  transport?: "http" | "stdio";
   url: string;
+  /** stdio: the command line that starts the server, e.g. `npx -y @modelcontextprotocol/server-filesystem D:\docs`. */
+  command?: string;
   /** Extra request headers, e.g. Authorization. Kept in this browser like provider keys. */
   headers: Record<string, string>;
   enabled: boolean;
+}
+
+export type LocalTool = "list_dir" | "read_file" | "search_files" | "write_file" | "edit_file" | "run_command";
+
+/** One line of a change preview; "gap" stands for unchanged lines left out. */
+export interface DiffLine {
+  type: "same" | "add" | "del" | "gap";
+  text: string;
 }
 
 export type SearchProvider = "bocha" | "tavily" | "searxng";

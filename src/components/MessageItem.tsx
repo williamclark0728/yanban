@@ -307,7 +307,7 @@ export function MessageItem({
         {hasBody && (
           <div className="rounded-[20px] bg-bubble px-4 py-2.5">
             {reasoning && <Reasoning text={reasoning} live={streaming && !msg.text} />}
-            {tools && <ToolSteps steps={tools} />}
+            {tools && <ToolSteps steps={tools} messageId={msg.id} />}
             {msg.text ? <RichText text={msg.text} agents={agents} cites={citations(tools)} /> : streaming && !reasoning && <Typing />}
             {msg.kind === "review" && (
               <div className="mt-2.5 border-t border-line pt-2.5">

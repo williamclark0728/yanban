@@ -18,7 +18,7 @@ export function tracer(messageId: string) {
     useData.getState().patchMessage(messageId, { tools: [...traces] }, t.status !== "running");
   };
   /** Steps still running when the reply stops are marked as stopped. */
-  const halt = () => traces.filter((t) => t.status === "running").forEach((t) => report({ ...t, status: "error", detail: "已停止" }));
+  const halt = () => traces.filter((t) => t.status === "running" || t.status === "waiting").forEach((t) => report({ ...t, status: "error", detail: "已停止" }));
   return { report, halt };
 }
 

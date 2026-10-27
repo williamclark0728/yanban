@@ -7,6 +7,7 @@ import { BotAvatar, GroupAvatar } from "./Avatar";
 import { DangerButton } from "./Editors";
 import { RunList } from "./RunRecords";
 import { Card, IconButton, Label, Segmented, Switch, Tabs } from "./ui";
+import { isDesktop, pickFolder } from "../lib/desktop";
 import { nativeSearch } from "../lib/llm";
 import { searchReady } from "../lib/search";
 
@@ -226,6 +227,30 @@ function AgentInfo({ agent }: { agent: Agent }) {
           </div>
           <Switch checked={!!agent.web} onChange={(web) => updateAgent(agent.id, { web })} label="联网搜索" />
         </Card>
+        {isDesktop && (
+          <Card className="mt-2 flex items-center gap-3 px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">工作模式</div>
+              {agent.workspace ? (
+                <button
+                  type="button"
+                  title="换一个文件夹"
+                  onClick={() => pickFolder().then((workspace) => workspace && updateAgent(agent.id, { workspace }))}
+                  className="block max-w-full truncate text-left font-mono text-[12.5px] text-accent-text hover:underline"
+                >
+                  {agent.workspace}
+                </button>
+              ) : (
+                <div className="text-[13px] text-fg-3">选一个文件夹，读写其中的文件、运行命令；修改前可看差异、可撤销</div>
+              )}
+            </div>
+            <Switch
+              checked={!!agent.workspace}
+              onChange={(on) => (on ? pickFolder().then((workspace) => workspace && updateAgent(agent.id, { workspace })) : updateAgent(agent.id, { workspace: undefined }))}
+              label="工作模式"
+            />
+          </Card>
+        )}
       </div>
       <div>
         <Label>角色设定</Label>

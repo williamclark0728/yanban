@@ -3,6 +3,7 @@
 import { jsonSchema, tool, type ToolSet } from "ai";
 import { useData } from "../store";
 import type { McpServer } from "../types";
+import { call as invoke, isDesktop, onEvent } from "./desktop";
 import { describeError, HttpError, proxiedFetch } from "./llm";
 import type { Report } from "./tools";
 
@@ -51,7 +52,15 @@ async function fromStream(res: Response, id: number): Promise<RpcMessage | null>
   }
 }
 
-class Session {
+interface Session {
+  start(): Promise<void>;
+  request(method: string, params?: unknown, signal?: AbortSignal): Promise<Record<string, unknown>>;
+  close?(): void;
+}
+
+const INIT = { protocolVersion: PROTOCOL, capabilities: {}, clientInfo: { name: "yanban", version: "0.1.0" } };
+
+class HttpSession implements Session {
   private sessionId?: string;
   private next = 1;
   constructor(private server: McpServer) {}
@@ -80,25 +89,115 @@ class Session {
   }
 
   async start() {
-    await this.request("initialize", { protocolVersion: PROTOCOL, capabilities: {}, clientInfo: { name: "yanban", version: "0.1.0" } });
+    await this.request("initialize", INIT);
     const res = await this.post({ jsonrpc: "2.0", method: "notifications/initialized" });
     void res.body?.cancel();
   }
 }
 
+interface StdioLine {
+  id: string;
+  line: string;
+}
+
+/** Desktop only: a local server process, one JSON-RPC message per line on stdin / stdout. */
+class StdioSession implements Session {
+  private next = 1;
+  private waiting = new Map<number, { resolve: (m: RpcMessage) => void; reject: (e: Error) => void }>();
+  private log: string[] = [];
+  private stops: (() => void)[] = [];
+  constructor(private server: McpServer) {}
+
+  private send = (msg: unknown) => invoke("mcp_send", { id: this.server.id, line: JSON.stringify(msg) });
+
+  async start() {
+    const mine = (f: (p: StdioLine) => void) => (p: StdioLine) => p.id === this.server.id && f(p);
+    this.stops.push(
+      await onEvent<StdioLine>(
+        "mcp-stdout",
+        mine(({ line }) => {
+          try {
+            const msg = JSON.parse(line) as RpcMessage;
+            if (typeof msg.id === "number") this.waiting.get(msg.id)?.resolve(msg);
+          } catch {
+            /* a log line on stdout */
+          }
+        }),
+      ),
+      await onEvent<StdioLine>(
+        "mcp-stderr",
+        mine(({ line }) => {
+          this.log.push(line);
+          this.log.splice(0, this.log.length - 5);
+        }),
+      ),
+      await onEvent<StdioLine>(
+        "mcp-exit",
+        mine(() => {
+          const why = new Error(`服务进程已退出${this.log.length ? `：${this.log.join(" ")}` : ""}`);
+          this.waiting.forEach((w) => w.reject(why));
+          this.waiting.clear();
+          sessions.delete(key(this.server));
+          toolLists.delete(key(this.server));
+        }),
+      ),
+    );
+    await invoke("mcp_start", { id: this.server.id, command: this.server.command });
+    // The first start may download the server (npx, uvx), so allow it longer.
+    await this.request("initialize", INIT, undefined, 120_000);
+    await this.send({ jsonrpc: "2.0", method: "notifications/initialized" });
+  }
+
+  async request(method: string, params?: unknown, signal?: AbortSignal, timeout = 60_000) {
+    const id = this.next++;
+    const reply = new Promise<RpcMessage>((resolve, reject) => {
+      const done = () => {
+        clearTimeout(timer);
+        this.waiting.delete(id);
+      };
+      const timer = setTimeout(() => {
+        done();
+        reject(new Error(`服务 ${timeout / 1000} 秒没有回应${this.log.length ? `：${this.log.join(" ")}` : ""}`));
+      }, timeout);
+      this.waiting.set(id, { resolve: (m) => (done(), resolve(m)), reject: (e) => (done(), reject(e)) });
+      signal?.addEventListener("abort", () => this.waiting.get(id)?.reject(new DOMException("stopped", "AbortError")), { once: true });
+    });
+    await this.send({ jsonrpc: "2.0", id, method, params });
+    const msg = await reply;
+    if (msg.error) throw new Error(msg.error.message || "服务返回了错误");
+    return msg.result ?? {};
+  }
+
+  close() {
+    this.stops.forEach((s) => s());
+    void invoke("mcp_stop", { id: this.server.id }).catch(() => {});
+  }
+}
+
+const stdio = (s: McpServer) => s.transport === "stdio";
+
+/** Servers this app can reach: stdio ones only in the desktop app. */
+export const usable = (s: McpServer) => s.enabled && (stdio(s) ? isDesktop && !!s.command?.trim() : !!s.url);
+
 // One session and one tool list per server while the page is open.
 const sessions = new Map<string, Promise<Session>>();
 const toolLists = new Map<string, Promise<McpTool[]>>();
-const key = (s: McpServer) => `${s.id}|${s.url}|${JSON.stringify(s.headers)}`;
+const key = (s: McpServer) => `${s.id}|${s.transport ?? "http"}|${s.url}|${s.command ?? ""}|${JSON.stringify(s.headers)}`;
 
 function session(server: McpServer, fresh = false) {
   const k = key(server);
-  if (fresh) sessions.delete(k);
+  if (fresh) {
+    sessions.get(k)?.then((s) => s.close?.(), () => {});
+    sessions.delete(k);
+  }
   let s = sessions.get(k);
   if (!s) {
-    const created = new Session(server);
+    const created: Session = stdio(server) ? new StdioSession(server) : new HttpSession(server);
     s = created.start().then(() => created);
-    s.catch(() => sessions.delete(k));
+    s.catch(() => {
+      created.close?.();
+      sessions.delete(k);
+    });
     sessions.set(k, s);
   }
   return s;
@@ -161,7 +260,7 @@ const toolName = (s: string) => s.replace(/[^\w-]/g, "_").slice(0, 60) || "tool"
 
 /** Tools of every enabled server. A server that can't be reached is left out and shown as a failed step. */
 export async function mcpTools(report: Report): Promise<ToolSet> {
-  const servers = useData.getState().mcpServers.filter((s) => s.enabled && s.url);
+  const servers = useData.getState().mcpServers.filter(usable);
   const set: ToolSet = {};
   await Promise.all(
     servers.map(async (server, i) => {

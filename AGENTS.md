@@ -8,6 +8,7 @@
 - 每次改动后依次运行：`npx tsc -b`、`npm run build`、`npm run check:copy`
 - 不用真实 Key 的端到端测试：`node scripts/mock-llm.mjs`，在设置里添加自定义服务，Base URL 填 `http://127.0.0.1:5199/v1`。它能扮演主持人（返回分工 JSON）和审查人（第 1 轮报问题，第 2 轮通过）；群聊里说「自我介绍」走各自发言、说「先搜集」走两人流水线；消息含「搜索」时调用 web_search，含「交给群」时调用 dispatch_to_group，含「生成 Word / Excel / PPT」时调用 make_file，含「技能」时调用 use_skill，含「查论文」时调用模拟 MCP 服务（`http://127.0.0.1:5199/mcp`）的 lookup_paper；模型 `mock-plain` 模拟不支持工具。搜索服务选 SearXNG、地址填 `http://127.0.0.1:5199` 即可用模拟搜索
 - 线上环境预演：`npm run build && npx wrangler pages dev dist --port 8788`
+- 桌面版：需要 Rust（MSVC 工具链）和 VS 生成工具的 C++ 组件。`npm run desktop:dev` 开发，`npm run desktop:build` 打安装包（`src-tauri/target/release/bundle/nsis/`）。Rust 测试：`cargo test --manifest-path src-tauri/Cargo.toml`
 
 ## 代码地图
 
@@ -20,6 +21,7 @@
 - `src/lib/skills.ts`：技能（通用 SKILL.md 格式，可导入整个技能文件夹，比如 `~/.codex/skills`）。系统提示只列名字和用途，模型用 `use_skill` 读取完整说明
 - `src/lib/mcp.ts`：远程 MCP 客户端（Streamable HTTP，自己实现的 initialize / tools/list / tools/call，响应可以是 JSON 或事件流），请求和模型调用一样走 `/api/relay`；启用的服务的工具提供给每次发言。本地 stdio MCP 留给桌面版
 - `src/lib/config.ts`、`src/components/Extensions.tsx`：配置导入导出（不含聊天记录；默认不含 Key，导入时文件里为空的 Key 不覆盖本机已存的），以及 设置 → 技能 / MCP 页面
+- 桌面版（Tauri 2，`src-tauri/`）：前端完全复用，`src/lib/desktop.ts` 判断是否在桌面里（`isDesktop`）并桥接 Rust。桌面里模型服务、搜索和远程 MCP 都用 HTTP 插件直连（不走 `/api/relay`），不提供本站的体验模型和本站搜索。工作模式：智能体资料里打开「工作模式」选一个文件夹（`Agent.workspace`），每次发言就带上 `src/lib/workmode.ts` 的六个工具（list_dir / read_file / search_files / write_file / edit_file / run_command），工作区的 `AGENTS.md` 写进系统提示当记忆。审批三档在 设置 → 通用（`usePrefs.approval`）；危险命令（`danger()` 的规则）任何档位都要点两次。改文件前在步骤里显示差异（`src/lib/diff.ts`），改完可撤销（旧内容存在步骤的 `undo` 里）。Rust 端（`src-tauri/src/workspace.rs`）所有路径都检查不能出工作区，命令用 PowerShell、有超时；`mcp.rs` 管本机 stdio MCP 进程，JSON-RPC 在前端（`mcp.ts` 的 `StdioSession`）
 - `src/lib/files.ts`：附件读取；`src/lib/export.ts`：记录导出
 - `src/store.ts`：Zustand store，所有写操作都同步写入 IndexedDB；`resolveModel` 决定每个智能体实际用哪个模型
 - `relay/handler.ts`：开发环境和 Cloudflare 共用的转发逻辑

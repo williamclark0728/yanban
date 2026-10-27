@@ -5,6 +5,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { APICallError, RetryError, generateText, isStepCount, streamText, type ModelMessage, type ToolSet } from "ai";
 import { useData } from "../store";
 import type { ModelParams, Provider, Source } from "../types";
+import { desktopFetch, isDesktop } from "./desktop";
 
 const RELAY = "/api/relay";
 
@@ -23,6 +24,7 @@ export function isDirect(baseUrl: string) {
 }
 
 function fetchFor(p: Pick<Provider, "baseUrl">): typeof fetch {
+  if (isDesktop) return desktopFetch;
   if (p.baseUrl.startsWith("/api/trial")) {
     return async (input, init) => {
       const res = await fetch(input, init);

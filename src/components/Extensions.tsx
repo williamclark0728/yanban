@@ -1,13 +1,14 @@
 import { BookOpen, Download, FolderOpen, Pencil, Plug, Plus, Trash2, Upload } from "lucide-react";
 import { useRef, useState, type InputHTMLAttributes } from "react";
 import { importConfig, saveConfigFile } from "../lib/config";
+import { isDesktop } from "../lib/desktop";
 import { describeError } from "../lib/llm";
 import { testMcp } from "../lib/mcp";
 import { parseSkill } from "../lib/skills";
 import { useData } from "../store";
 import type { McpServer, Skill } from "../types";
 import { Field, inputCls, Row, StatusBox, type Status } from "./SettingsDialog";
-import { IconButton, Switch } from "./ui";
+import { IconButton, Segmented, Switch } from "./ui";
 
 const outline = "flex h-10 items-center gap-1.5 rounded-full border border-line-2 px-4 text-sm font-medium hover:bg-hover disabled:opacity-50";
 const solid = "h-10 rounded-full bg-fg px-5 text-sm font-semibold text-bg hover:opacity-90 disabled:opacity-50";
@@ -218,7 +219,11 @@ export function McpSettings() {
 
   return (
     <div className="space-y-4">
-      <p className="px-1 text-[13px] text-fg-3">连接远程 MCP 服务（Streamable HTTP），它的工具会提供给所有智能体，调用时显示在回复的步骤里。本机的 stdio 服务要在桌面版里用。</p>
+      <p className="px-1 text-[13px] text-fg-3">
+        {isDesktop
+          ? "连接远程 MCP 服务（Streamable HTTP）或本机程序（stdio），它们的工具会提供给所有智能体，调用时显示在回复的步骤里。"
+          : "连接远程 MCP 服务（Streamable HTTP），它的工具会提供给所有智能体，调用时显示在回复的步骤里。本机的 stdio 服务要在桌面版里用。"}
+      </p>
       <button type="button" className={outline} onClick={() => setEditing({ id: crypto.randomUUID(), name: "", url: "", headers: {}, enabled: true })}>
         <Plus size={15} /> 添加 MCP 服务
       </button>
@@ -231,7 +236,7 @@ export function McpSettings() {
               </span>
               <button type="button" onClick={() => setEditing(s)} className="min-w-0 flex-1 text-left">
                 <div className="truncate font-medium">{s.name}</div>
-                <div className="truncate font-mono text-[12px] text-fg-3">{s.url}</div>
+                <div className="truncate font-mono text-[12px] text-fg-3">{s.transport === "stdio" ? `本机：${s.command}` : s.url}</div>
               </button>
               <Switch checked={s.enabled} onChange={(enabled) => setMcpServers(mcpServers.map((x) => (x.id === s.id ? { ...x, enabled } : x)))} label={`启用 ${s.name}`} />
             </div>
@@ -244,13 +249,32 @@ export function McpSettings() {
   );
 }
 
+function fallbackName(url: string, command: string) {
+  if (command.trim()) return command.trim().split(/\s+/).find((w) => !/^(npx|uvx|-y|node|python|cmd)$/i.test(w))?.split(/[\\/]/).pop() ?? "MCP 服务";
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "MCP 服务";
+  }
+}
+
 function McpForm({ server, onSave, onCancel, onDelete }: { server: McpServer; onSave: (s: McpServer) => void; onCancel: () => void; onDelete: () => void }) {
   const [name, setName] = useState(server.name);
+  const [transport, setTransport] = useState(server.transport ?? "http");
   const [url, setUrl] = useState(server.url);
+  const [command, setCommand] = useState(server.command ?? "");
   const [headers, setHeaders] = useState(headerText(server.headers));
   const [status, setStatus] = useState<Status>(null);
-  const draft = (): McpServer => ({ ...server, name: name.trim() || (() => { try { return new URL(url).hostname; } catch { return "MCP 服务"; } })(), url: url.trim(), headers: parseHeaders(headers) });
-  const valid = /^https?:\/\/\S+$/.test(url.trim());
+  const local = transport === "stdio";
+  const draft = (): McpServer => ({
+    ...server,
+    name: name.trim() || fallbackName(local ? "" : url, local ? command : ""),
+    transport,
+    url: local ? "" : url.trim(),
+    command: local ? command.trim() : undefined,
+    headers: local ? {} : parseHeaders(headers),
+  });
+  const valid = local ? !!command.trim() : /^https?:\/\/\S+$/.test(url.trim());
 
   const test = async () => {
     setStatus({ kind: "busy", text: "正在连接…" });
@@ -268,15 +292,44 @@ function McpForm({ server, onSave, onCancel, onDelete }: { server: McpServer; on
       <Field label="名字">
         <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="比如 文献检索" />
       </Field>
-      <Field label="地址" hint="Streamable HTTP 端点，通常以 /mcp 结尾">
-        <input className={`${inputCls} font-mono text-sm`} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/mcp" />
-      </Field>
-      <Field label="请求头（可选）" hint="每行一个，比如 Authorization: Bearer …，保存在本机浏览器">
-        <textarea className={`${area} font-mono text-[13px]`} rows={3} value={headers} onChange={(e) => setHeaders(e.target.value)} spellCheck={false} />
-      </Field>
+      {isDesktop && (
+        <Field label="连接方式">
+          <Segmented
+            value={transport}
+            onChange={(v) => {
+              setTransport(v);
+              setStatus(null);
+            }}
+            options={[
+              { value: "http", label: "远程（HTTP）" },
+              { value: "stdio", label: "本机程序（stdio）" },
+            ]}
+          />
+        </Field>
+      )}
+      {local ? (
+        <Field label="启动命令" hint="在本机启动服务的命令，第一次用 npx / uvx 时会先下载，需要多等一会儿">
+          <input
+            className={`${inputCls} font-mono text-sm`}
+            value={command}
+            onChange={(e) => setCommand(e.target.value)}
+            placeholder="npx -y @modelcontextprotocol/server-filesystem D:\docs"
+            spellCheck={false}
+          />
+        </Field>
+      ) : (
+        <>
+          <Field label="地址" hint="Streamable HTTP 端点，通常以 /mcp 结尾">
+            <input className={`${inputCls} font-mono text-sm`} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/mcp" />
+          </Field>
+          <Field label="请求头（可选）" hint="每行一个，比如 Authorization: Bearer …，保存在本机">
+            <textarea className={`${area} font-mono text-[13px]`} rows={3} value={headers} onChange={(e) => setHeaders(e.target.value)} spellCheck={false} />
+          </Field>
+        </>
+      )}
       <StatusBox status={status} />
       <div className="flex flex-wrap items-center gap-2">
-        {server.url && (
+        {(server.url || server.command) && (
           <button type="button" onClick={onDelete} className="h-10 rounded-full px-4 text-sm font-medium text-bad hover:bg-bad-soft">
             删除
           </button>

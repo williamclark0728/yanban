@@ -2,6 +2,7 @@ import clsx from "clsx";
 import { BookOpen, CheckCircle2, ChevronLeft, ExternalLink, Eye, EyeOff, Globe, Loader2, Plug, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { protocols } from "../lib/catalog";
+import { isDesktop } from "../lib/desktop";
 import { describeError, listModels, testProvider } from "../lib/llm";
 import { isReady, resolveModel, TRIAL_ID, useData, usePrefs, useUi, type SettingsTab } from "../store";
 import type { Provider, SearchConfig } from "../types";
@@ -103,7 +104,7 @@ export function Row({ title, desc, children }: { title: string; desc?: string; c
 }
 
 function General() {
-  const { mode, setMode, theme, setTheme, name, setName } = usePrefs();
+  const { mode, setMode, theme, setTheme, name, setName, approval, setApproval } = usePrefs();
   const { agents, groups, restoreExamples } = useData();
   const [restoring, setRestoring] = useState(false);
   const missing =
@@ -158,6 +159,28 @@ function General() {
           {missing ? `添加回来（${missing} 个）` : "都在列表里"}
         </button>
       </Row>
+      {isDesktop && (
+        <Row
+          title="工作模式审批"
+          desc={
+            approval === "ask"
+              ? "读文件、改文件、运行命令都先问你"
+              : approval === "read"
+                ? "读文件和搜索直接做，改文件和运行命令先问你"
+                : "全部直接做；危险命令仍然要你确认两次"
+          }
+        >
+          <Segmented
+            value={approval}
+            onChange={setApproval}
+            options={[
+              { value: "ask", label: "每次询问" },
+              { value: "read", label: "只读自动" },
+              { value: "full", label: "完全权限" },
+            ]}
+          />
+        </Row>
+      )}
       <ConfigRow />
     </div>
   );

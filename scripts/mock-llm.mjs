@@ -137,11 +137,22 @@ createServer(async (req, res) => {
           ? `已按技能说明处理（说明 ${result.length} 字）。`
           : result.startsWith("《")
             ? `查到了：${result}`
-            : `群里已经完成：${result.slice(0, 80)}`;
+            : /^(已写入|退出码|用户没有同意|失败|内容没有变化)/.test(result)
+              ? `工作区操作结果：${result.slice(0, 120)}`
+              : `群里已经完成：${result.slice(0, 80)}`;
   } else if (!system.includes("只输出一个 JSON 对象")) {
     // "生成 Word / Excel / PPT" asks for make_file with sample content.
     const kind = /生成/.test(last) && (/PPT|幻灯片/i.test(last) ? "pptx" : /Excel|表格/i.test(last) ? "xlsx" : /Word|文档/i.test(last) ? "docx" : null);
-    if (/技能/.test(last) && tools.includes("use_skill")) {
+    // Desktop work mode: "写文件" / "改文件" / "运行命令" / "危险命令" call the workspace tools.
+    if (/写文件/.test(last) && tools.includes("write_file")) {
+      call = { name: "write_file", arguments: { path: "hello.md", content: "# 你好\n\n这是研伴写的文件。\n" } };
+    } else if (/改文件/.test(last) && tools.includes("edit_file")) {
+      call = { name: "edit_file", arguments: { path: "hello.md", old_text: "这是研伴写的文件。", new_text: "这一行被改过了。" } };
+    } else if (/危险命令/.test(last) && tools.includes("run_command")) {
+      call = { name: "run_command", arguments: { command: "Remove-Item -Recurse -Force notes" } };
+    } else if (/运行命令/.test(last) && tools.includes("run_command")) {
+      call = { name: "run_command", arguments: { command: "Get-ChildItem -Name" } };
+    } else if (/技能/.test(last) && tools.includes("use_skill")) {
       const name = payload.tools.find((t) => t.function.name === "use_skill").function.parameters.properties.name.enum[0];
       call = { name: "use_skill", arguments: { name } };
     } else if (/查论文/.test(last) && tools.includes("lookup_paper")) {

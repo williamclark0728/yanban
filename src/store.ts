@@ -2,20 +2,26 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { presets, fromPreset } from "./lib/catalog";
 import { addExamples, db, ensureSeeded, getKv, setKv } from "./lib/db";
+import { isDesktop } from "./lib/desktop";
 import type { Agent, ChatRef, Group, McpServer, Message, ModelRef, Provider, Run, SearchConfig, Skill, TeamTemplate } from "./types";
 
 export type Theme = "dark" | "light" | "system";
 export type PanelTab = "info" | "members" | "runs" | "memory";
 export type SettingsTab = "general" | "providers" | "search" | "skills" | "mcp";
 
+/** Desktop work mode: which local actions need the user's OK. Dangerous commands always do. */
+export type Approval = "ask" | "read" | "full";
+
 interface Prefs {
   mode: "simple" | "dev";
   theme: Theme;
   /** What the user wants to be called; empty until they set it. */
   name: string;
+  approval: Approval;
   setMode: (mode: Prefs["mode"]) => void;
   setTheme: (theme: Theme) => void;
   setName: (name: string) => void;
+  setApproval: (approval: Approval) => void;
 }
 
 export const usePrefs = create<Prefs>()(
@@ -24,9 +30,11 @@ export const usePrefs = create<Prefs>()(
       mode: "simple",
       theme: "dark",
       name: "",
+      approval: "read",
       setMode: (mode) => set({ mode }),
       setTheme: (theme) => set({ theme }),
       setName: (name) => set({ name: name.slice(0, 20) }),
+      setApproval: (approval) => set({ approval }),
     }),
     { name: "yanban.prefs" },
   ),
@@ -182,8 +190,12 @@ export const useData = create<Data>()((set, get) => ({
       getKv<Skill[]>("skills", []),
       getKv<McpServer[]>("mcpServers", []),
     ]);
-    // A reply that was streaming when the page closed ends as stopped.
-    const fixed = messages.map((m) => (m.kind === "text" && m.status === "streaming" ? { ...m, status: "stopped" as const } : m));
+    // A reply that was streaming when the page closed ends as stopped, and so do its unfinished steps.
+    const fixed = messages.map((m) =>
+      m.kind === "text" && m.status === "streaming"
+        ? { ...m, status: "stopped" as const, tools: m.tools?.map((t) => (t.status === "running" || t.status === "waiting" ? { ...t, status: "error" as const, detail: "已停止" } : t)) }
+        : m,
+    );
     const trial = get().trial;
     set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(trial ? [...providers, trialProvider(trial)] : providers), defaultModel, search, templates, skills, mcpServers });
     void get().refreshTrial();
@@ -191,6 +203,8 @@ export const useData = create<Data>()((set, get) => ({
   },
 
   refreshSiteSearch: async () => {
+    // The site's own endpoints serve the website only; the desktop app uses the user's services.
+    if (isDesktop) return set({ siteSearch: null });
     try {
       const res = await fetch("/api/search/status");
       const s = res.ok ? await res.json() : null;
@@ -204,6 +218,7 @@ export const useData = create<Data>()((set, get) => ({
 
   refreshTrial: async () => {
     let trial: Trial | null = null;
+    if (isDesktop) return;
     try {
       const res = await fetch("/api/trial/status");
       const s = res.ok ? await res.json() : null;

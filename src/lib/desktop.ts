@@ -1,0 +1,35 @@
+// The Windows desktop app (Tauri). The same frontend runs there; this module is the bridge to the Rust side.
+import type { InvokeArgs } from "@tauri-apps/api/core";
+
+/** True inside the desktop app. */
+export const isDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+export async function call<T>(command: string, args?: InvokeArgs): Promise<T> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  try {
+    return await invoke<T>(command, args);
+  } catch (e) {
+    // Rust commands reject with a plain string that is already worded for the user.
+    throw new Error(typeof e === "string" ? e : (e as Error)?.message || "出错了");
+  }
+}
+
+/**
+ * HTTP from the Rust side: no CORS, so model services, search and MCP servers are called directly
+ * instead of through the site's relay.
+ */
+export const desktopFetch: typeof fetch = async (input, init) => {
+  const { fetch } = await import("@tauri-apps/plugin-http");
+  return fetch(input, init);
+};
+
+export async function pickFolder(): Promise<string | null> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const picked = await open({ directory: true, multiple: false, title: "选择工作区文件夹" });
+  return typeof picked === "string" ? picked : null;
+}
+
+export async function onEvent<T>(name: string, handler: (payload: T) => void) {
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<T>(name, (e) => handler(e.payload));
+}
