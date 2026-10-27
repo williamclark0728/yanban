@@ -7,7 +7,7 @@ import { BotAvatar, GroupAvatar } from "./Avatar";
 import { DangerButton } from "./Editors";
 import { RunList } from "./RunRecords";
 import { Card, IconButton, Label, Segmented, Switch, Tabs } from "./ui";
-import { isDesktop, pickFolder } from "../lib/desktop";
+import { DESKTOP_DOWNLOAD, isDesktop, pickFolder } from "../lib/desktop";
 import { nativeSearch } from "../lib/llm";
 import { searchReady } from "../lib/search";
 
@@ -227,6 +227,17 @@ function AgentInfo({ agent }: { agent: Agent }) {
           </div>
           <Switch checked={!!agent.web} onChange={(web) => updateAgent(agent.id, { web })} label="联网搜索" />
         </Card>
+        {!isDesktop && (
+          <Card className="mt-2 flex items-center gap-3 px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">工作模式</div>
+              <div className="text-[13px] text-fg-3">在 Windows 桌面版里读写本机文件夹、运行命令</div>
+            </div>
+            <a href={DESKTOP_DOWNLOAD} className="shrink-0 rounded-full border border-line-2 px-3 py-1.5 text-[13px] font-medium hover:bg-hover">
+              下载桌面版
+            </a>
+          </Card>
+        )}
         {isDesktop && (
           <Card className="mt-2 flex items-center gap-3 px-4 py-3">
             <div className="min-w-0 flex-1">

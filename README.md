@@ -4,6 +4,8 @@
 
 **👉 一键体验：[yanban.shengzy.top](https://yanban.shengzy.top)**　打开就能用，不用注册，不填 Key 也能先聊
 
+**💻 Windows 桌面版：[下载安装包](https://github.com/williamclark0728/yanban/releases/latest/download/Yanban-Windows-x64-setup.exe)**　多了「工作模式」，智能体能在你选的文件夹里读写文件、运行命令（[更新说明](https://github.com/williamclark0728/yanban/releases/latest)）
+
 还在担心 AI 没听懂你的意思，答非所问？
 还在担心 AI 一本正经地编数字、造引用？
 还在把同一个问题复制到好几个 AI 里，自己来回核对？
@@ -32,6 +34,10 @@
 - 📎 **直接丢文件**：PDF（包括中文论文）、Word、图片、文本，拖进来、粘贴进来都行。
 - 🔌 **模型随你挑**：内置 DeepSeek、通义千问、Kimi、智谱、豆包、硅基流动、OpenAI、Claude、Gemini、OpenRouter 等，也能接入任何自定义 API。每个智能体可以用不同的模型。
 - 🎚️ **新手和爱折腾的都照顾到**：简洁模式开箱即用；开发者模式可以调参数，看 Token 用量、耗时和审核通过率。
+- 📄 **直接交文件**：让智能体生成 Word、Excel、PPT 或 Markdown，在消息里预览，一键下载；PPT 套用内置版式，讲稿写在备注里。
+- 💻 **桌面版工作模式**：在 Windows 桌面版里给智能体一个文件夹，它能读写文件、运行命令。审批分三档，危险命令要确认两次，改动先看差异、改完能撤销。
+- 🧰 **技能与 MCP**：导入通用的 SKILL.md 技能（可以整个文件夹导入），连接远程 MCP 服务；桌面版还能连本机的 MCP 程序。
+- 📱 **装到手机上**：手机浏览器打开网站，「添加到主屏幕」就能当应用用。
 - 🔒 **数据留在你自己手里**：聊天记录和 API Key 只存在你自己的浏览器里，不会上传到服务器。
 
 ## 三步上手
@@ -40,12 +46,12 @@
 2. 先用内置的体验模型直接聊（每天 30 次）；想长期用，就在 设置 → 模型服务 里填一个自己的 API Key
 3. 进「论文写作组」（或点左上角 ＋ 从模板新建一个团队），把任务交给管家，然后看它们干活
 
-## 接下来
+## 桌面版
 
-- 📄 直接生成 Word、Excel、PPT
-- 💻 Windows 桌面版「工作模式」：在本地读写文件、写代码，权限分三档审批
-- 📱 安卓版
-- 🧰 MCP 与 Skills 扩展
+1. 下载 [Yanban-Windows-x64-setup.exe](https://github.com/williamclark0728/yanban/releases/latest/download/Yanban-Windows-x64-setup.exe)（Windows 10 / 11，64 位），双击安装。
+2. 安装包没有代码签名，Windows 弹出「Windows 已保护你的电脑」时，点 **更多信息 → 仍要运行**。
+3. 在 设置 → 模型服务 里填自己的 API Key（桌面版没有体验模型）。网页版配好的，可以在网页版 设置 → 通用 导出配置，再到桌面版导入。
+4. 打开智能体资料里的「工作模式」，选一个文件夹，就能让它在里面干活。
 
 **开源、免费（MIT 协议）**。欢迎 Star、提 Issue，一起把它做得更好用。
 
@@ -62,7 +68,10 @@
 - 协作记录：逐轮留痕，单 Agent 对照（同一任务单独完成，再用同样的标准审查），导出 Markdown 或 JSON。
 - 文件：文本、PDF（含中文）、Word、图片，可以选择文件、拖放或粘贴。
 - 模型服务：内置 DeepSeek、通义百炼、Kimi、智谱、豆包、硅基流动、OpenAI、Anthropic、Gemini、OpenRouter、NVIDIA、Ollama，也可以添加自定义服务。支持 OpenAI Chat、OpenAI Responses、Anthropic Messages、Gemini 四种协议。
-- 简洁模式和开发者模式（参数、Token、耗时、接受率）；深色、浅色或跟随系统；适配手机宽度。
+- 文件产出：Word（docx）、Excel（SheetJS）、PPT（pptxgenjs，内置版式）、Markdown，消息里预览，下载时在浏览器里生成；任何回复都能下载为 Word。
+- 技能（SKILL.md）、远程 MCP（Streamable HTTP）、配置导入导出；模型自带联网（通义千问、智谱、Kimi、Gemini 3）。
+- Windows 桌面版（Tauri 2）：工作模式（看目录、读、搜、写、改文件，运行 PowerShell），三档审批，危险命令两次确认，差异预览和撤销，工作区 `AGENTS.md` 当记忆，本机 stdio MCP。
+- 简洁模式和开发者模式（参数、Token、耗时、接受率）；深色、浅色或跟随系统；适配手机宽度，可安装为应用（PWA）。
 
 ## 运行
 
@@ -82,6 +91,8 @@ npm run dev
 | `npm run check:copy` | 检查界面文案里的免责声明式措辞 |
 | `npx wrangler pages dev dist` | 在本机按 Cloudflare Pages 的方式运行打包结果（含 `/api/relay`） |
 | `node scripts/mock-llm.mjs` | 本机模拟模型服务，Base URL 填 `http://127.0.0.1:5199/v1`，会扮演主持人和审查人 |
+| `npm run desktop:dev` | 运行桌面版（需要 Rust 和 VS 生成工具的 C++ 组件） |
+| `npm run desktop:build` | 打包桌面版安装包，输出在 `src-tauri/target/release/bundle/nsis/` |
 
 ## 数据与密钥
 

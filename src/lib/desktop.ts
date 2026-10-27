@@ -4,6 +4,10 @@ import type { InvokeArgs } from "@tauri-apps/api/core";
 /** True inside the desktop app. */
 export const isDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+/** The newest Windows installer (the release asset keeps this name across versions). */
+export const DESKTOP_DOWNLOAD = "https://github.com/williamclark0728/yanban/releases/latest/download/Yanban-Windows-x64-setup.exe";
+export const DESKTOP_RELEASES = "https://github.com/williamclark0728/yanban/releases/latest";
+
 export async function call<T>(command: string, args?: InvokeArgs): Promise<T> {
   const { invoke } = await import("@tauri-apps/api/core");
   try {

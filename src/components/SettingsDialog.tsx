@@ -1,8 +1,8 @@
 import clsx from "clsx";
-import { BookOpen, CheckCircle2, ChevronLeft, ExternalLink, Eye, EyeOff, Globe, Loader2, Plug, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
+import { BookOpen, CheckCircle2, ChevronLeft, Download, ExternalLink, Eye, EyeOff, Globe, Loader2, Plug, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { protocols } from "../lib/catalog";
-import { isDesktop } from "../lib/desktop";
+import { DESKTOP_DOWNLOAD, DESKTOP_RELEASES, isDesktop } from "../lib/desktop";
 import { describeError, listModels, testProvider } from "../lib/llm";
 import { isReady, resolveModel, TRIAL_ID, useData, usePrefs, useUi, type SettingsTab } from "../store";
 import type { Provider, SearchConfig } from "../types";
@@ -159,6 +159,21 @@ function General() {
           {missing ? `添加回来（${missing} 个）` : "都在列表里"}
         </button>
       </Row>
+      {!isDesktop && (
+        <Row title="Windows 桌面版" desc="多了工作模式：智能体在你选的文件夹里读写文件、运行命令，每一步可以审批和撤销">
+          <div className="flex items-center gap-3">
+            <a href={DESKTOP_RELEASES} target="_blank" rel="noreferrer" className="text-[13px] text-accent-text hover:underline">
+              更新说明
+            </a>
+            <a
+              href={DESKTOP_DOWNLOAD}
+              className="flex h-10 items-center gap-1.5 rounded-full bg-fg px-5 text-sm font-semibold text-bg hover:opacity-90"
+            >
+              <Download size={15} /> 下载
+            </a>
+          </div>
+        </Row>
+      )}
       {isDesktop && (
         <Row
           title="工作模式审批"
