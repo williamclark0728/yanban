@@ -73,8 +73,21 @@ createServer(async (req, res) => {
     // Group lead: greetings get a direct answer; otherwise the first member produces and the rest review.
     const members = [...system.matchAll(/^- (.+?)：/gm)].map((m) => m[1]);
     const latest = [...last.matchAll(/【用户】([^\n]*)/g)].at(-1)?.[1] ?? "";
+    // "自我介绍" → everyone speaks; "先搜集" → a two-step chain (the second producer waits for the first) plus a reviewer.
     reply = /你好|hi/i.test(latest)
-      ? JSON.stringify({ reply: "你好！有任务直接说。", assignments: [] })
+      ? JSON.stringify({ reply: "你好！有任务直接说。", mode: "answer", assignments: [] })
+      : /自我介绍/.test(latest)
+      ? JSON.stringify({ reply: "请大家介绍一下自己。", mode: "speak", assignments: members.map((m) => ({ member: m, type: "produce", task: "两三句话介绍自己" })) })
+      : /先搜集/.test(latest)
+      ? JSON.stringify({
+          reply: "先搜集再写。",
+          mode: "work",
+          assignments: [
+            { member: members[0], type: "produce", task: "搜集资料" },
+            { member: members[1], type: "produce", task: "根据资料写稿", after: members[0] },
+            ...members.slice(2, 3).map((m) => ({ member: m, type: "review", task: "审查稿件" })),
+          ],
+        })
       : "```json\n" +
         JSON.stringify({
           reply: "收到，分工如下：",

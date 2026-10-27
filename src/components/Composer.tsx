@@ -1,6 +1,7 @@
 import clsx from "clsx";
-import { AlertCircle, ArrowUp, Loader2, Plus, Square, X } from "lucide-react";
+import { AlertCircle, ArrowUp, Loader2, Plus, Square, Users, X } from "lucide-react";
 import { useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
+import { ALL } from "../lib/collab";
 import { ACCEPT, formatSize, readAttachment } from "../lib/files";
 import type { Agent, Attachment } from "../types";
 import { BotAvatar } from "./Avatar";
@@ -63,6 +64,7 @@ export function Composer({
 
   const mention = members.length > 0 ? /@([^\s@]*)$/.exec(text) : null;
   const matches = mention ? members.filter((m) => m.name.includes(mention[1])) : [];
+  const everyone = !!mention && members.length > 1 && ALL.startsWith(mention[1]);
   const ready = pending.filter((p) => p.status === "ready").map((p) => p.file!);
   const reading = pending.some((p) => p.status === "reading");
   const canSend = !busy && !reading && (!!text.trim() || ready.length > 0);
@@ -74,20 +76,29 @@ export function Composer({
     setPending([]);
   };
 
-  const pick = (agent: Agent) => {
-    setText((t) => t.replace(/@([^\s@]*)$/, `@${agent.name} `));
+  const pick = (name: string) => {
+    setText((t) => t.replace(/@([^\s@]*)$/, `@${name} `));
     ref.current?.focus();
   };
 
   return (
     <div className="relative">
-      {matches.length > 0 && (
+      {(matches.length > 0 || everyone) && (
         <div className="rise absolute bottom-full left-2 mb-2 w-56 rounded-2xl border border-line bg-raise p-1.5 shadow-[var(--shadow)]">
+          {everyone && (
+            <button type="button" onClick={() => pick(ALL)} className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left hover:bg-hover">
+              <span className="grid size-6 place-items-center rounded-full bg-hover">
+                <Users size={14} />
+              </span>
+              <span className="text-sm font-medium">{ALL}</span>
+              <span className="ml-auto truncate text-xs text-fg-3">每人直接回复</span>
+            </button>
+          )}
           {matches.map((m) => (
             <button
               key={m.id}
               type="button"
-              onClick={() => pick(m)}
+              onClick={() => pick(m.name)}
               className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left hover:bg-hover"
             >
               <BotAvatar agent={m} size={24} />
@@ -172,7 +183,8 @@ export function Composer({
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
-                if (matches.length > 0) pick(matches[0]);
+                if (matches.length > 0) pick(matches[0].name);
+                else if (everyone) pick(ALL);
                 else submit();
               }
             }}

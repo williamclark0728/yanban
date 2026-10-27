@@ -29,7 +29,15 @@ interface Assignment {
   agent: Agent;
   task: string;
   type: Kind;
+  /** A producer listed earlier whose output this one waits for and builds on. */
+  after?: Agent;
 }
+
+/** Mentioning this makes every member answer directly. */
+export const ALL = "所有人";
+
+/** Requests where members just speak in turn, used when the lead's plan doesn't say. */
+const TAKE_TURNS = /自我介绍|介绍(一下)?(你们|自己)|各自|每个人|每人|轮流|大家(都)?(说|谈|聊)/;
 
 const REVIEW_RULES = [
   "你负责审查。对照用户的需求和提供的材料，检查最新一版稿件。按顺序做三件事：",
@@ -60,23 +68,33 @@ function extractJson(raw: string): Record<string, unknown> | null {
   }
 }
 
-/** Reads the lead's JSON plan; tolerant of code fences, extra prose and Chinese labels. */
-export function parsePlan(raw: string, members: Agent[]): { reply: string; assignments: Assignment[] } | null {
+/**
+ * Reads the lead's JSON plan; tolerant of code fences, extra prose and Chinese labels.
+ * `after` only counts when it names a producer listed earlier, so waits can't form a loop.
+ */
+export function parsePlan(raw: string, members: Agent[]): { reply: string; speak: boolean; assignments: Assignment[] } | null {
   const data = extractJson(raw);
   if (!data) return null;
   const byName = (name: string) =>
     members.find((m) => m.name === name) ?? members.find((m) => name.includes(m.name) || m.name.includes(name));
-  const merged = new Map<string, Assignment>();
+  const clean = (v: unknown) => String(v ?? "").replace(/^@/, "").trim();
+  const merged = new Map<string, Assignment & { wait: string }>();
   for (const a of Array.isArray(data.assignments) ? data.assignments : []) {
-    const name = String(a?.member ?? "").replace(/^@/, "").trim();
+    const name = clean(a?.member);
     const task = String(a?.task ?? "").trim();
     const agent = name && byName(name);
     if (!agent || !task) continue;
     const type: Kind = /review|审|核/i.test(String(a?.type ?? "")) ? "review" : "produce";
     const prev = merged.get(agent.id);
-    merged.set(agent.id, { agent, type: prev?.type ?? type, task: prev ? `${prev.task}；${task}` : task });
+    merged.set(agent.id, { agent, type: prev?.type ?? type, task: prev ? `${prev.task}；${task}` : task, wait: prev?.wait || clean(a?.after) });
   }
-  return { reply: typeof data.reply === "string" ? data.reply.trim() : "", assignments: [...merged.values()] };
+  const list = [...merged.values()];
+  const assignments = list.map(({ wait, ...a }, i) => {
+    const before = wait && a.type === "produce" ? byName(wait) : undefined;
+    const ok = before && list.slice(0, i).some((x) => x.agent.id === before.id && x.type === "produce");
+    return ok ? { ...a, after: before } : a;
+  });
+  return { reply: typeof data.reply === "string" ? data.reply.trim() : "", speak: /speak|发言/i.test(String(data.mode ?? "")), assignments };
 }
 
 export function issueStatus(value: unknown): IssueStatus {
@@ -226,9 +244,13 @@ export async function sendToGroup(groupId: string, text: string, attachments?: A
   addMessage({ id: messageId, chat: groupId, kind: "text", sender: "me", text, attachments, via, at: Date.now() });
 
   const members = group.memberIds.map(agentById).filter((a): a is Agent => !!a);
-  const named = members.filter((m) => text.includes(`@${m.name}`));
   const lead = members.find((m) => m.id === group.leadId) ?? members[0];
   if (!lead) return null;
+  if (!via && text.includes(`@${ALL}`)) {
+    await answerMentions(group, [lead, ...members.filter((m) => m.id !== lead.id)]);
+    return null;
+  }
+  const named = members.filter((m) => text.includes(`@${m.name}`));
   if (!via && named.length > 0 && !named.some((m) => m.id === lead.id)) {
     await answerMentions(group, named);
     return null;
@@ -375,7 +397,9 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
       delivered = answer.text;
       return;
     }
-    const list = assignments.map((a, i) => `${i + 1}. @${a.agent.name}${a.type === "review" ? "（审查）" : ""} ${a.task}`).join("\n");
+    const list = assignments
+      .map((a, i) => `${i + 1}. @${a.agent.name}${a.type === "review" ? "（审查）" : a.after ? `（等${a.after.name}完成后）` : ""} ${a.task}`)
+      .join("\n");
     patchMessage(
       plan.messageId,
       { text: [intro || (assignments.length ? "收到，分工如下：" : ""), list].filter(Boolean).join("\n\n"), reasoning: plan.reasoning?.trim() ? plan.reasoning : undefined, status: undefined, usage: plan.usage },
@@ -390,6 +414,9 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
     if (!assignments.some((a) => a.type === "produce")) assignments = assignments.map((a) => ({ ...a, type: "produce" }));
     const producers = assignments.filter((a) => a.type === "produce");
     const reviewers = assignments.filter((a) => a.type === "review");
+    // Producers someone else builds on only work in round 1; the ones at the end of a chain revise.
+    const finals = producers.filter((p) => !producers.some((q) => q.after?.id === p.agent.id));
+    const takingTurns = !reviewers.length && (!!parsed?.speak || TAKE_TURNS.test(task));
 
     recorded = true;
     const planStep: RunStep = {
@@ -411,24 +438,33 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
 
       // 2. Produce or revise
       const feedback = open.map((o) => `- ${o.reviewer.name}：${formatIssue(o.issue)}`).join("\n");
+      const writers = r === 1 ? producers : finals;
+      // Each producer starts once the one it waits for has finished, so it sees that output in the transcript.
+      const finished = new Map<string, Promise<unknown>>();
       const outputs = await Promise.all(
-        producers.map(async (a) => {
-          const instruction =
-            r === 1
-              ? `${lead.name}分配给你的任务：${a.task}\n用户的原始需求：「${task}」\n产出要逐项满足原始需求里的每个要求，直接给出完整产出。`
-              : `第 ${r - 1} 轮审查意见（[成立] 必须修改，[存疑] 请补充依据或说明）：\n${feedback}\n\n请在你上一版的基础上修订，输出完整的新版本；最后加一段「修订说明」，逐条说明每个疑点改了什么或为什么不改。`;
-          const out = await speak({ chat: group.id, agent: a.agent, system: groupSystem(a.agent, group), messages: prompt(instruction), signal });
-          round.steps.push({ agentId: a.agent.id, type: r === 1 ? "draft" : "revise", summary: summarize(out.text) || "未完成", tokens: out.tokens, failed: !out.ok, messageId: out.messageId });
-          save();
-          return out;
+        writers.map((a) => {
+          const work = (async () => {
+            if (r === 1 && a.after) await finished.get(a.after.id);
+            if (signal.aborted) return null;
+            const instruction =
+              r === 1
+                ? `${lead.name}分配给你的任务：${a.task}\n用户的原始需求：「${task}」\n${a.after ? `${a.after.name}的产出已在群聊记录里，在它的基础上完成你的任务。\n` : ""}产出要逐项满足原始需求里的每个要求，直接给出完整产出。`
+                : `第 ${r - 1} 轮审查意见（[成立] 必须修改，[存疑] 请补充依据或说明）：\n${feedback}\n\n请在你上一版的基础上修订，输出完整的新版本；最后加一段「修订说明」，逐条说明每个疑点改了什么或为什么不改。`;
+            const out = await speak({ chat: group.id, agent: a.agent, system: groupSystem(a.agent, group), messages: prompt(instruction), signal });
+            round.steps.push({ agentId: a.agent.id, type: r === 1 ? "draft" : "revise", summary: summarize(out.text) || "未完成", tokens: out.tokens, failed: !out.ok, messageId: out.messageId });
+            save();
+            return out;
+          })();
+          finished.set(a.agent.id, work);
+          return work;
         }),
       );
       if (signal.aborted) return void (run.status = "stopped");
-      if (outputs.every((o) => !o.ok)) return void (run.status = "failed");
+      if (outputs.every((o) => !o?.ok)) return void (run.status = "failed");
       if (!reviewers.length) break;
 
       // 3. Review
-      const authors = producers.map((a) => a.agent);
+      const authors = writers.map((a) => a.agent);
       const reviews = await Promise.all(
         reviewers.map(async (a) => {
           const t = await think({
@@ -481,9 +517,11 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
 
     // 5. Deliver
     const unresolved = open.map((o) => `- ${formatIssue(o.issue)}`).join("\n");
-    const instruction = !reviewers.length
-      ? `请汇总以上成员的产出，完成用户的需求：${task}\n先给结论或成品，再简要列出各成员的贡献。没完成的部分如实说明。如果成员只是各自发言（比如自我介绍），用一两句话收尾即可，不要重复他们说过的内容。`
-      : passed
+    const instruction = takingTurns
+      ? "成员们已经各自发言。请用一两句话自然地收尾，比如回应一下大家、说说接下来可以怎么用这个群。不要复述或总结成员说过的话，不要写“结论”“各成员贡献”“未完成部分”这类小标题或列表。"
+      : !reviewers.length
+        ? `请汇总以上成员的产出，完成用户的需求：${task}\n先给结论或成品，再简要列出各成员的贡献。没完成的部分如实说明。`
+        : passed
         ? `审查已通过。请把最终成果交付给用户：先给出完整成品（以作者最新一版为准，不要改动已核实的内容，保留其中按用户要求列出的内容），再用几句话说明各成员的结论和修订经过。\n用户的原始需求：「${task}」`
         : `已到最多轮数，审查仍未全部通过。请交付作者最新一版的完整成品，并如实列出仍未解决的疑点：\n${unresolved}\n用户的原始需求：「${task}」`;
     const final = await speak({ chat: group.id, agent: lead, system: groupSystem(lead, group), messages: prompt(instruction, lead.params.history), signal });
@@ -493,7 +531,7 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
     if (final.ok && !reviewers.length) {
       const round = run.rounds[0];
       round.verdict = "done";
-      round.note = `${outputsDone(round)} 位成员完成，${lead.name}已汇总`;
+      round.note = takingTurns ? `${outputsDone(round)} 位成员已发言` : `${outputsDone(round)} 位成员完成，${lead.name}已汇总`;
       addMessage({ id: uid(), chat: group.id, kind: "round", runId: run.id, round: 1, verdict: "done", note: round.note, at: Date.now() });
     }
   };
