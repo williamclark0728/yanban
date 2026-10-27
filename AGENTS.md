@@ -14,7 +14,7 @@
 - `src/lib/llm.ts`：按协议创建模型，`streamReply`（流式）和 `completeText`（一次性），模型列表，连接测试，`describeError`（把错误转成一句中文）
 - `src/lib/chat.ts`：系统提示（四要素、记忆、当前日期）、上下文组装（附件、图片、群聊记录 `transcript`）、`speak`（流式发言写进消息）、私聊
 - `src/lib/collab.ts`：群聊入口 `sendToGroup`、@ 回复、`collaborate`（分工 → 产出 / 修订 → 审查 → `judge` → 交付）、`runBaseline`（单 Agent 对照）、`acceptance`（接受率）；`dispatchTools`（私聊里主持人把任务派到群，等交付后返回结果）。主持人分工提示（`planSystem`，在 chat.ts）分三种（JSON 的 `mode`：work / speak / answer）：实际工作分工、成员各自发言（只产出不审查，主持人只用一两句收尾）、自己回答；主持人回复只是复述用户原话时（`echoes`）改为直接回复一次。产出成员默认并行；分工里的 `after` 指向排在前面的产出成员时，等它完成再开始（流水线），之后的修订轮只由链条末端的成员修订。`@所有人` 让全部成员（含主持人）直接回复
-- `src/lib/tools.ts`、`src/lib/search.ts`：`web_search` 和 `read_page` 工具，搜索服务配置在 设置 → 联网搜索；每次工具调用写进消息的 `tools` 字段，界面显示为步骤和来源。工具都在浏览器里执行，网络请求走 `/api/relay`
+- `src/lib/tools.ts`、`src/lib/search.ts`：`web_search` 和 `read_page` 工具，搜索服务配置在 设置 → 联网搜索。智能体开了联网、而模型自带搜索时（`nativeSearch`，在 llm.ts：通义千问加 `enable_search`，智谱加 `web_search` 工具，Kimi 用 `builtin_function` 的 `$web_search` 原样回传参数，Gemini 3 及以后加 Google Search 并显示来源），直接用模型自带的搜索，不再传这两个工具（`webPlan` / `webAccess`）；DeepSeek 等没有自带搜索的仍用这两个工具；每次工具调用写进消息的 `tools` 字段，界面显示为步骤和来源。工具都在浏览器里执行，网络请求走 `/api/relay`
 - `src/lib/templates.ts`、`src/components/Templates.tsx`：团队模板。内置模板的成员取自 `seed.ts`（管家、主笔、核查员、审稿人）加上调研员、策划；按模板建群时同名智能体直接复用；用户的模板存在 kv `templates`。每个模板只放一位产出成员，其余做审查（需要先后顺序时由主持人用 `after` 安排）
 - `src/lib/outputs.ts`、`src/lib/filegen.ts`、`src/components/MadeFiles.tsx`：文件产出。每次发言（`speak`）都带 `make_file` 工具，模型只写内容（Markdown 正文 / 工作表 / 每页标题、要点、讲稿），存在消息的 `files` 字段；预览直接渲染这些内容，下载时才按需加载 `filegen.ts`（docx、SheetJS、pptxgenjs）生成真文件，PPT 套用内置版式。生成的文件内容会写进群聊记录，审查成员能看到。任何回复都可以「下载为 Word」
 - `src/lib/files.ts`：附件读取；`src/lib/export.ts`：记录导出

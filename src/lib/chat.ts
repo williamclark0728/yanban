@@ -6,7 +6,7 @@ import { attachmentText, hasImages } from "./files";
 import { dispatchRules, dispatchTools } from "./collab";
 import { describeError, streamReply } from "./llm";
 import { FILE_RULES, fileTools, filesText } from "./outputs";
-import { tracer, WEB_RULES, webEnabled, webTools, type Report } from "./tools";
+import { NATIVE_WEB_RULES, tracer, WEB_RULES, webAccess, webPlan, type Report } from "./tools";
 
 /** Chats with work in flight. One run per chat; stopping a chat aborts all of its replies. */
 export const useBusy = create<Record<string, boolean>>(() => ({}));
@@ -43,7 +43,8 @@ export function systemPrompt(agent: Agent) {
   const me = usePrefs.getState().name.trim();
   if (me) lines.push(`用户的称呼：${me}`);
   if (agent.memory.length) lines.push("", "关于用户你已经知道：", ...agent.memory.map((m) => `- ${m}`));
-  if (webEnabled(agent)) lines.push("", WEB_RULES);
+  const web = webPlan(agent);
+  if (web) lines.push("", web === "tools" ? WEB_RULES : NATIVE_WEB_RULES);
   lines.push("", `现在是${now()}。`, "用用户的语言回答，回答直接、具体。");
   return lines.join("\n");
 }
@@ -199,7 +200,8 @@ export async function speak(opts: {
   }
 
   const { report, halt } = tracer(id);
-  const tools = { ...(webEnabled(opts.agent) ? webTools(report) : {}), ...fileTools(id, report), ...opts.extraTools?.(report) };
+  const web = webAccess(opts.agent, report);
+  const tools = { ...web.tools, ...fileTools(id, report), ...opts.extraTools?.(report) };
 
   let text = "";
   let reasoning = "";
@@ -226,6 +228,8 @@ export async function speak(opts: {
       params: opts.agent.params,
       signal: opts.signal,
       tools,
+      search: web.search,
+      onSources: web.onSources,
       onText: (d) => {
         text += d;
         schedule();

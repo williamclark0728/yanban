@@ -4,7 +4,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { APICallError, RetryError, generateText, isStepCount, streamText, type ModelMessage, type ToolSet } from "ai";
 import { useData } from "../store";
-import type { ModelParams, Provider } from "../types";
+import type { ModelParams, Provider, Source } from "../types";
 
 const RELAY = "/api/relay";
 
@@ -48,8 +48,50 @@ const trimSlash = (s: string) => s.trim().replace(/\/+$/, "");
 /** The SDKs need absolute URLs; this site's own API is stored as a path. */
 const absolute = (s: string) => (s.startsWith("/") ? new URL(s, location.origin).href : s);
 
-export function languageModel(p: Provider, modelId: string) {
-  const fetch = fetchFor(p);
+export type NativeSearch = "qwen" | "zhipu" | "kimi" | "gemini";
+
+/** Kimi's built-in search is a tool call the client hands straight back. */
+export const KIMI_SEARCH = "$web_search";
+
+/**
+ * Services whose models can search the web themselves. Gemini only from version 3:
+ * older models can't use Google Search together with function tools.
+ */
+export function nativeSearch(p: Provider, modelId: string): NativeSearch | null {
+  let host = "";
+  try {
+    host = new URL(p.baseUrl).hostname;
+  } catch {
+    return null;
+  }
+  if (p.protocol === "openai-chat") {
+    if (/(^|\.)dashscope(-intl)?\.aliyuncs\.com$/.test(host)) return "qwen";
+    if (/(^|\.)bigmodel\.cn$/.test(host) || host === "api.z.ai") return "zhipu";
+    if (/(^|\.)moonshot\.(cn|ai)$/.test(host)) return "kimi";
+  }
+  if (p.protocol === "gemini" && host === "generativelanguage.googleapis.com" && /gemini-([3-9]|\d{2})/.test(modelId)) return "gemini";
+  return null;
+}
+
+/** Turns on the service's own search in the request body (Gemini's goes in as a tool instead). */
+function searchingFetch(base: typeof fetch, kind: NativeSearch): typeof fetch {
+  return (input, init) => {
+    if (typeof init?.body !== "string") return base(input, init);
+    const body = JSON.parse(init.body);
+    if (kind === "qwen") body.enable_search = true;
+    if (kind === "zhipu") body.tools = [...(body.tools ?? []), { type: "web_search", web_search: { enable: true, search_engine: "search_std", search_result: true } }];
+    if (kind === "kimi") {
+      body.tools = body.tools?.map((t: { function?: { name?: string } }) =>
+        t.function?.name === KIMI_SEARCH ? { type: "builtin_function", function: { name: KIMI_SEARCH } } : t,
+      );
+    }
+    return base(input, { ...init, body: JSON.stringify(body) });
+  };
+}
+
+export function languageModel(p: Provider, modelId: string, search = false) {
+  const kind = search ? nativeSearch(p, modelId) : null;
+  const fetch = kind && kind !== "gemini" ? searchingFetch(fetchFor(p), kind) : fetchFor(p);
   const baseURL = absolute(trimSlash(p.baseUrl));
   const apiKey = p.apiKey || "none";
   switch (p.protocol) {
@@ -172,6 +214,25 @@ interface CallOptions {
   /** Tools the model may call; calls run in a loop until it answers or `maxSteps` is reached. */
   tools?: ToolSet;
   maxSteps?: number;
+  /** Use the service's own web search (see `nativeSearch`). */
+  search?: boolean;
+  /** Web pages the model cited, for services that report them (Gemini). */
+  onSources?: (sources: Source[]) => void;
+}
+
+function citedPages(sources: { sourceType: string; url?: string; title?: string }[]): Source[] {
+  const seen = new Set<string>();
+  return sources.flatMap((s) => {
+    if (s.sourceType !== "url" || !s.url || seen.has(s.url)) return [];
+    seen.add(s.url);
+    let site: string | undefined;
+    try {
+      site = new URL(s.url).hostname.replace(/^www\./, "");
+    } catch {
+      /* keep it without a site */
+    }
+    return [{ url: s.url, title: s.title || site || s.url, site }];
+  });
 }
 
 export interface StreamResult {
@@ -197,7 +258,7 @@ function rejectsTools(e: unknown) {
 function settings(opts: CallOptions, withTools: boolean) {
   const { provider, params } = opts;
   return {
-    model: languageModel(provider, opts.modelId),
+    model: languageModel(provider, opts.modelId, opts.search),
     system: withTools ? opts.system : opts.tools ? opts.system + NO_TOOLS_NOTE : opts.system,
     messages: opts.messages,
     temperature: provider.protocol === "anthropic" ? Math.min(params.temperature, 1) : params.temperature,
@@ -228,6 +289,8 @@ const seconds = (started: number) => Math.round((performance.now() - started) / 
 export async function completeText(opts: CallOptions): Promise<StreamResult & { text: string; reasoning: string }> {
   const started = performance.now();
   const r = await withToolFallback(opts, (withTools) => generateText(settings(opts, withTools)), () => false);
+  const pages = citedPages(r.sources);
+  if (pages.length) opts.onSources?.(pages);
   return {
     text: r.text,
     reasoning: r.reasoningText ?? "",
@@ -267,6 +330,8 @@ export async function streamReply(
       else if (part.type === "abort") break;
     }
     if (opts.signal.aborted) throw new DOMException("stopped", "AbortError");
+    const pages = citedPages(await result.sources);
+    if (pages.length) opts.onSources?.(pages);
     return result.totalUsage;
   };
   const usage = await withToolFallback(opts, run, () => produced);

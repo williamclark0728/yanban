@@ -7,6 +7,7 @@ import { BotAvatar, GroupAvatar } from "./Avatar";
 import { DangerButton } from "./Editors";
 import { RunList } from "./RunRecords";
 import { Card, IconButton, Label, Segmented, Switch, Tabs } from "./ui";
+import { nativeSearch } from "../lib/llm";
 import { searchReady } from "../lib/search";
 
 export function DetailPanel() {
@@ -186,6 +187,7 @@ function AgentInfo({ agent }: { agent: Agent }) {
   const dev = usePrefs((s) => s.mode === "dev");
   const searchOk = searchReady(search) || !!siteSearch;
   const target = resolveModel(agent, providers, defaultModel);
+  const native = target && nativeSearch(target.provider, target.modelId);
   const fallback = resolveModel(undefined, providers, defaultModel);
   const inherits = !agent.model || !target || target.provider.id !== agent.model.provider;
   const role = [
@@ -211,7 +213,9 @@ function AgentInfo({ agent }: { agent: Agent }) {
           <div className="min-w-0 flex-1">
             <div className="font-medium">联网搜索</div>
             <div className="text-[13px] text-fg-3">
-              {searchOk ? (
+              {native ? (
+                "当前模型自带联网搜索，需要时直接搜索"
+              ) : searchOk ? (
                 "需要时搜索网页、阅读原文，回答里标注来源"
               ) : (
                 <button type="button" onClick={() => openSettings("search")} className="text-accent-text hover:underline">

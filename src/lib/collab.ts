@@ -21,7 +21,7 @@ import {
   withFiles,
 } from "./chat";
 import { completeText, describeError } from "./llm";
-import { tracer, webEnabled, webTools, type Report } from "./tools";
+import { tracer, webAccess, type Report } from "./tools";
 
 type Kind = "produce" | "review";
 
@@ -174,6 +174,7 @@ async function think(opts: { chat: string; agent: Agent; system: string; message
     return { ok: false, text: "", reasoning: "", tokens: 0, messageId: id };
   }
   const { report, halt } = tracer(id);
+  const web = webAccess(opts.agent, report);
   try {
     const params = { ...opts.agent.params, temperature: opts.temperature ?? opts.agent.params.temperature };
     const r = await completeText({
@@ -183,7 +184,9 @@ async function think(opts: { chat: string; agent: Agent; system: string; message
       messages: opts.messages,
       params,
       signal: opts.signal,
-      tools: webEnabled(opts.agent) ? webTools(report) : undefined,
+      tools: Object.keys(web.tools).length ? web.tools : undefined,
+      search: web.search,
+      onSources: web.onSources,
     });
     return {
       ok: true,

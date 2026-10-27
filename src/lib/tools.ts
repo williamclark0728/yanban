@@ -1,7 +1,8 @@
+import { google } from "@ai-sdk/google";
 import { jsonSchema, tool, type ToolSet } from "ai";
-import { useData } from "../store";
-import type { Agent, ToolTrace } from "../types";
-import { describeError } from "./llm";
+import { resolveModel, useData } from "../store";
+import type { Agent, Source, ToolTrace } from "../types";
+import { describeError, KIMI_SEARCH, nativeSearch, type NativeSearch } from "./llm";
 import { canSearch, readPage, searchWeb } from "./search";
 
 /** Adds or updates one tool step on the message being written. */
@@ -21,13 +22,56 @@ export function tracer(messageId: string) {
   return { report, halt };
 }
 
-export const webEnabled = (agent: Agent) => !!agent.web && canSearch();
+/**
+ * How an agent with web access searches: the model's own search when its service has one,
+ * otherwise the web_search / read_page tools when a search service is available.
+ */
+export function webPlan(agent: Agent): NativeSearch | "tools" | null {
+  if (!agent.web) return null;
+  const { providers, defaultModel } = useData.getState();
+  const target = resolveModel(agent, providers, defaultModel);
+  const native = target && nativeSearch(target.provider, target.modelId);
+  return native || (canSearch() ? "tools" : null);
+}
+
+export const webEnabled = (agent: Agent) => webPlan(agent) !== null;
 
 export const WEB_RULES = [
   "你可以联网：web_search 搜索网页，read_page 阅读某个网页的全文。",
   "需要最新信息、具体数据、新闻或你不确定的事实时，先搜索再回答；常识问题不用搜。",
   "引用搜索结果时，在句末用 [编号] 标注来源，编号沿用搜索结果里的编号。",
 ].join("\n");
+
+export const NATIVE_WEB_RULES = [
+  "你可以联网搜索。",
+  "需要最新信息、具体数据、新闻或你不确定的事实时，先搜索再回答；常识问题不用搜。回答里注明信息来源。",
+].join("\n");
+
+const NATIVE_LABEL: Record<NativeSearch, string> = { qwen: "通义千问", zhipu: "智谱", kimi: "Kimi", gemini: "Google" };
+
+/** The web part of a model call: tools to pass, whether to turn on the service's own search, and where cited pages go. */
+export function webAccess(agent: Agent, report: Report): { tools: ToolSet; search: boolean; onSources?: (s: Source[]) => void } {
+  const plan = webPlan(agent);
+  if (!plan) return { tools: {}, search: false };
+  if (plan === "tools") return { tools: webTools(report), search: false };
+  const label = `${NATIVE_LABEL[plan]}自带搜索`;
+  const onSources = (sources: Source[]) =>
+    report({ id: "native-search", name: "web_search", label, status: "done", detail: `${sources.length} 个来源`, sources, first: 1 });
+  if (plan === "gemini") return { tools: { google_search: google.tools.googleSearch({}) }, search: true, onSources };
+  if (plan === "kimi") {
+    // Kimi runs the search itself; the client only returns the call's arguments unchanged.
+    const echo = tool({
+      description: "联网搜索",
+      inputSchema: jsonSchema<Record<string, unknown>>({ type: "object", properties: {} }),
+      execute: async (args, { toolCallId }) => {
+        report({ id: toolCallId, name: "web_search", label, status: "done" });
+        return args;
+      },
+    });
+    return { tools: { [KIMI_SEARCH]: echo }, search: true };
+  }
+  return { tools: {}, search: true };
+}
 
 const fail = (e: unknown) => describeError(e).message;
 
