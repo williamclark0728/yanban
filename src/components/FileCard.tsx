@@ -1,4 +1,4 @@
-import { FileCode2, FileImage, FileText, FileType2, X } from "lucide-react";
+import { FileArchive, FileCode2, FileImage, FileSpreadsheet, FileText, FileType2, Presentation, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { formatSize } from "../lib/files";
 import type { Attachment } from "../types";
@@ -9,6 +9,9 @@ export function FileIcon({ kind }: { kind?: Attachment["kind"] }) {
   if (kind === "docx") return <FileText size={16} />;
   if (kind === "image") return <FileImage size={16} />;
   if (kind === "text") return <FileCode2 size={16} />;
+  if (kind === "sheet") return <FileSpreadsheet size={16} />;
+  if (kind === "slides") return <Presentation size={16} />;
+  if (kind === "zip") return <FileArchive size={16} />;
   return <FileText size={16} />;
 }
 

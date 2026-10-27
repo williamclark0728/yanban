@@ -2,7 +2,7 @@ import clsx from "clsx";
 import { AlertCircle, ArrowUp, Loader2, Plus, Square, Users, X } from "lucide-react";
 import { useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
 import { ALL } from "../lib/collab";
-import { ACCEPT, formatSize, readAttachment } from "../lib/files";
+import { formatSize, readAttachment } from "../lib/files";
 import type { Agent, Attachment } from "../types";
 import { BotAvatar } from "./Avatar";
 import { FileIcon } from "./FileCard";
@@ -25,6 +25,7 @@ export function Composer({
   members,
   busy = false,
   tools,
+  trailing,
   onSend,
   onStop,
   ref: handle,
@@ -33,6 +34,8 @@ export function Composer({
   members: Agent[];
   busy?: boolean;
   tools?: ReactNode;
+  /** Shown just before the send button. */
+  trailing?: ReactNode;
   onSend: (text: string, attachments: Attachment[]) => void;
   onStop?: () => void;
   ref?: Ref<ComposerHandle>;
@@ -45,6 +48,11 @@ export function Composer({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // An empty box is one line; measuring it while the window is hidden can give a stale height.
+    if (!text) {
+      el.style.height = "";
+      return;
+    }
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, [text]);
@@ -149,7 +157,7 @@ export function Composer({
           <button
             type="button"
             aria-label="添加附件"
-            title="添加文件：文本、PDF、Word 或图片"
+            title="添加文件：文本、代码、PDF、Word、Excel、PPT、zip 压缩包或图片"
             onClick={() => picker.current?.click()}
             className="grid size-9 shrink-0 place-items-center rounded-full text-fg-2 hover:bg-active hover:text-fg"
           >
@@ -159,7 +167,6 @@ export function Composer({
             ref={picker}
             type="file"
             multiple
-            accept={ACCEPT}
             className="hidden"
             onChange={(e) => {
               if (e.target.files) addFiles([...e.target.files]);
@@ -190,6 +197,7 @@ export function Composer({
             }}
             className="max-h-[200px] min-h-9 flex-1 resize-none bg-transparent py-[7px] leading-[22px] outline-none placeholder:text-fg-3"
           />
+          {trailing}
           {busy ? (
             <button
               type="button"

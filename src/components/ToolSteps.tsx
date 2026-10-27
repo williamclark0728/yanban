@@ -3,6 +3,7 @@ import {
   AlertCircle,
   BookOpen,
   ChevronDown,
+  Download,
   FilePen,
   FilePlus2,
   FileSearch,
@@ -29,6 +30,7 @@ const icons = {
   dispatch_to_group: Users,
   make_file: FilePlus2,
   use_skill: BookOpen,
+  install_skill: Download,
   mcp: Plug,
   list_dir: FolderOpen,
   read_file: FileText,
@@ -61,6 +63,8 @@ function verb(t: ToolTrace) {
       return `生成 ${t.label}`;
     case "use_skill":
       return `使用技能「${t.label}」`;
+    case "install_skill":
+      return `安装技能「${t.label}」`;
     case "mcp":
       return `调用 ${t.label}`;
     case "dispatch_to_group":

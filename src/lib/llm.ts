@@ -4,8 +4,9 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { APICallError, RetryError, generateText, isStepCount, streamText, type ModelMessage, type ToolSet } from "ai";
 import { useData } from "../store";
-import type { ModelParams, Provider, Source } from "../types";
+import type { Effort, ModelParams, Provider, Source } from "../types";
 import { desktopFetch, isDesktop } from "./desktop";
+import { recordUsage } from "./usage";
 
 const RELAY = "/api/relay";
 
@@ -59,27 +60,46 @@ export const KIMI_SEARCH = "$web_search";
  * Services whose models can search the web themselves. Gemini only from version 3:
  * older models can't use Google Search together with function tools.
  */
-export function nativeSearch(p: Provider, modelId: string): NativeSearch | null {
-  let host = "";
+const hostOf = (baseUrl: string) => {
   try {
-    host = new URL(p.baseUrl).hostname;
+    return new URL(baseUrl).hostname;
   } catch {
-    return null;
+    return "";
   }
+};
+const isDashscope = (host: string) => /(^|\.)dashscope(-intl)?\.aliyuncs\.com$/.test(host);
+const isZhipu = (host: string) => /(^|\.)bigmodel\.cn$/.test(host) || host === "api.z.ai";
+
+export function nativeSearch(p: Provider, modelId: string): NativeSearch | null {
+  const host = hostOf(p.baseUrl);
+  if (!host) return null;
   if (p.protocol === "openai-chat") {
-    if (/(^|\.)dashscope(-intl)?\.aliyuncs\.com$/.test(host)) return "qwen";
-    if (/(^|\.)bigmodel\.cn$/.test(host) || host === "api.z.ai") return "zhipu";
+    // Bailian also hosts other vendors' models (DeepSeek, Kimi…); only Qwen's own take enable_search.
+    if (isDashscope(host)) return /^(qwen|qwq)/i.test(modelId) ? "qwen" : null;
+    if (isZhipu(host)) return "zhipu";
     if (/(^|\.)moonshot\.(cn|ai)$/.test(host)) return "kimi";
   }
   if (p.protocol === "gemini" && host === "generativelanguage.googleapis.com" && /gemini-([3-9]|\d{2})/.test(modelId)) return "gemini";
   return null;
 }
 
-/** Turns on the service's own search in the request body (Gemini's goes in as a tool instead). */
-function searchingFetch(base: typeof fetch, kind: NativeSearch): typeof fetch {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Body = Record<string, any>;
+
+/** Changes the JSON body of each request on its way out, for settings the SDK has no option for. */
+function editingFetch(base: typeof fetch, edits: ((body: Body) => void)[]): typeof fetch {
+  if (!edits.length) return base;
   return (input, init) => {
     if (typeof init?.body !== "string") return base(input, init);
     const body = JSON.parse(init.body);
+    for (const edit of edits) edit(body);
+    return base(input, { ...init, body: JSON.stringify(body) });
+  };
+}
+
+/** Turns on the service's own search in the request body (Gemini's goes in as a tool instead). */
+function searchEdit(kind: NativeSearch) {
+  return (body: Body) => {
     if (kind === "qwen") body.enable_search = true;
     if (kind === "zhipu") body.tools = [...(body.tools ?? []), { type: "web_search", web_search: { enable: true, search_engine: "search_std", search_result: true } }];
     if (kind === "kimi") {
@@ -87,13 +107,47 @@ function searchingFetch(base: typeof fetch, kind: NativeSearch): typeof fetch {
         t.function?.name === KIMI_SEARCH ? { type: "builtin_function", function: { name: KIMI_SEARCH } } : t,
       );
     }
-    return base(input, { ...init, body: JSON.stringify(body) });
   };
 }
 
-export function languageModel(p: Provider, modelId: string, search = false) {
+const BUDGET = { low: 2048, medium: 8192, high: 16384, max: 32768 } as const;
+
+/**
+ * Thinking switches for services that take their own fields instead of `reasoning_effort`.
+ * Bailian only allows thinking on streamed calls, so one-shot calls (planning, review) leave it off.
+ */
+function effortEdit(p: Provider, effort: Effort, streaming: boolean) {
+  if (effort === "auto" || p.protocol !== "openai-chat") return null;
+  const host = hostOf(p.baseUrl);
+  if (isDashscope(host)) {
+    return (body: Body) => {
+      delete body.reasoning_effort;
+      body.enable_thinking = streaming && effort !== "off";
+      if (body.enable_thinking) body.thinking_budget = BUDGET[effort as keyof typeof BUDGET];
+    };
+  }
+  if (isZhipu(host)) {
+    return (body: Body) => {
+      delete body.reasoning_effort;
+      body.thinking = { type: effort === "off" ? "disabled" : "enabled" };
+    };
+  }
+  return null;
+}
+
+/** The SDK's own reasoning setting, which each provider turns into its service's parameter. */
+function reasoning(p: Provider, effort: Effort) {
+  if (effort === "auto") return undefined;
+  // OpenAI-style services mostly know low / medium / high only, and many reject "none".
+  if (p.protocol === "openai-chat") return effort === "off" ? undefined : effort === "max" ? ("high" as const) : effort;
+  if (effort === "off") return "none" as const;
+  return effort;
+}
+
+export function languageModel(p: Provider, modelId: string, search = false, effort: Effort = "auto", streaming = true) {
   const kind = search ? nativeSearch(p, modelId) : null;
-  const fetch = kind && kind !== "gemini" ? searchingFetch(fetchFor(p), kind) : fetchFor(p);
+  const edits = [kind && kind !== "gemini" ? searchEdit(kind) : null, effortEdit(p, effort, streaming)].filter((e) => !!e);
+  const fetch = editingFetch(fetchFor(p), edits);
   const baseURL = absolute(trimSlash(p.baseUrl));
   const apiKey = p.apiKey || "none";
   switch (p.protocol) {
@@ -222,6 +276,9 @@ interface CallOptions {
   onSources?: (sources: Source[]) => void;
 }
 
+/** Tool steps one reply may take. Work-mode tasks (read a skill, look around, write files) need many. */
+export const MAX_STEPS = 60;
+
 function citedPages(sources: { sourceType: string; url?: string; title?: string }[]): Source[] {
   const seen = new Set<string>();
   return sources.flatMap((s) => {
@@ -257,18 +314,22 @@ function rejectsTools(e: unknown) {
   return status >= 400 && status < 500 && status !== 401 && status !== 403 && status !== 429 && /tool|function/i.test(err.responseBody ?? err.message);
 }
 
-function settings(opts: CallOptions, withTools: boolean) {
+function settings(opts: CallOptions, withTools: boolean, streaming: boolean) {
   const { provider, params } = opts;
+  const effort = params.effort ?? "auto";
+  // Claude only thinks at its default sampling settings.
+  const thinkingClaude = provider.protocol === "anthropic" && effort !== "auto" && effort !== "off";
   return {
-    model: languageModel(provider, opts.modelId, opts.search),
+    model: languageModel(provider, opts.modelId, opts.search, effort, streaming),
     system: withTools ? opts.system : opts.tools ? opts.system + NO_TOOLS_NOTE : opts.system,
     messages: opts.messages,
-    temperature: provider.protocol === "anthropic" ? Math.min(params.temperature, 1) : params.temperature,
-    topP: params.topP < 1 ? params.topP : undefined,
-    maxOutputTokens: params.maxTokens,
+    temperature: thinkingClaude ? undefined : provider.protocol === "anthropic" ? Math.min(params.temperature, 1) : params.temperature,
+    topP: params.topP < 1 && !thinkingClaude ? params.topP : undefined,
+    maxOutputTokens: params.maxTokens > 0 ? params.maxTokens : undefined,
+    reasoning: reasoning(provider, effort),
     abortSignal: opts.signal,
     maxRetries: 1,
-    ...(withTools && opts.tools ? { tools: opts.tools, stopWhen: isStepCount(opts.maxSteps ?? 6) } : {}),
+    ...(withTools && opts.tools ? { tools: opts.tools, stopWhen: isStepCount(opts.maxSteps ?? MAX_STEPS) } : {}),
   };
 }
 
@@ -290,9 +351,10 @@ const seconds = (started: number) => Math.round((performance.now() - started) / 
 /** One-shot call for structured steps (planning, review) where streaming adds nothing. */
 export async function completeText(opts: CallOptions): Promise<StreamResult & { text: string; reasoning: string }> {
   const started = performance.now();
-  const r = await withToolFallback(opts, (withTools) => generateText(settings(opts, withTools)), () => false);
+  const r = await withToolFallback(opts, (withTools) => generateText(settings(opts, withTools, false)), () => false);
   const pages = citedPages(r.sources);
   if (pages.length) opts.onSources?.(pages);
+  recordUsage(opts.modelId, r.totalUsage.inputTokens ?? 0, r.totalUsage.outputTokens ?? 0);
   return {
     text: r.text,
     reasoning: r.reasoningText ?? "",
@@ -311,7 +373,7 @@ export async function streamReply(
   const started = performance.now();
   let produced = false;
   const run = async (withTools: boolean) => {
-    const result = streamText(settings(opts, withTools));
+    const result = streamText(settings(opts, withTools, true));
     // Text before and after a tool call arrives as separate steps; keep them apart.
     let stepHadText = false;
     let gap = false;
@@ -337,5 +399,6 @@ export async function streamReply(
     return result.totalUsage;
   };
   const usage = await withToolFallback(opts, run, () => produced);
+  recordUsage(opts.modelId, usage.inputTokens ?? 0, usage.outputTokens ?? 0);
   return { input: usage.inputTokens ?? 0, output: usage.outputTokens ?? 0, seconds: seconds(started) };
 }

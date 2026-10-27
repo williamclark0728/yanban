@@ -78,7 +78,7 @@ createServer(async (req, res) => {
     `- 上下文里有 ${msgs.filter((m) => m.role !== "system").length} 条消息\n` +
     `- 系统提示 ${system.length} 字\n` +
     `- 附件：${files.length ? files.join("、") : "无"}；图片 ${images} 张\n` +
-    `- temperature=${payload.temperature} max_tokens=${payload.max_tokens ?? payload.max_completion_tokens}`;
+    `- temperature=${payload.temperature} max_tokens=${payload.max_tokens ?? payload.max_completion_tokens} reasoning_effort=${payload.reasoning_effort}`;
   if (system.includes("你负责审查")) {
     // Reviewer: round 1 finds problems, later rounds pass; a single-agent answer ("待审查稿件") gets two problems.
     const round = Number(/第 (\d+) 轮的产出/.exec(last)?.[1] ?? 0);
@@ -137,7 +137,7 @@ createServer(async (req, res) => {
           ? `已按技能说明处理（说明 ${result.length} 字）。`
           : result.startsWith("《")
             ? `查到了：${result}`
-            : /^(已写入|退出码|用户没有同意|失败|内容没有变化)/.test(result)
+            : /^(已写入|退出码|用户没有同意|失败|内容没有变化|已安装|安装失败)/.test(result)
               ? `工作区操作结果：${result.slice(0, 120)}`
               : `群里已经完成：${result.slice(0, 80)}`;
   } else if (!system.includes("只输出一个 JSON 对象")) {
@@ -152,6 +152,8 @@ createServer(async (req, res) => {
       call = { name: "run_command", arguments: { command: "Remove-Item -Recurse -Force notes" } };
     } else if (/运行命令/.test(last) && tools.includes("run_command")) {
       call = { name: "run_command", arguments: { command: "Get-ChildItem -Name" } };
+    } else if (/安装技能/.test(last) && tools.includes("install_skill")) {
+      call = { name: "install_skill", arguments: { content: "---\nname: 周报助手\ndescription: 把一周的实验记录整理成周报\n---\n\n# 周报助手\n\n按“本周进展 / 问题 / 下周计划”三段写。" } };
     } else if (/技能/.test(last) && tools.includes("use_skill")) {
       const name = payload.tools.find((t) => t.function.name === "use_skill").function.parameters.properties.name.enum[0];
       call = { name: "use_skill", arguments: { name } };

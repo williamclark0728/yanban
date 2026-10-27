@@ -7,11 +7,16 @@ export interface RoleCard {
   protocol: string; // 协作协议
 }
 
+/** How hard the model thinks before answering; "auto" leaves it to the service. */
+export type Effort = "auto" | "off" | "low" | "medium" | "high" | "max";
+
 export interface ModelParams {
   temperature: number;
   topP: number;
+  /** Longest reply in tokens; 0 means no limit of our own (the service's maximum). */
   maxTokens: number;
   history: number; // how many past messages go into the context
+  effort?: Effort;
 }
 
 export interface ModelRef {
@@ -42,6 +47,8 @@ export interface Group {
   leadId: string;
   maxRounds: number;
   consensus: "strict" | "relaxed";
+  /** Desktop work mode for the whole group: every member works in this folder. */
+  workspace?: string;
 }
 
 export type ChatRef = { kind: "agent" | "group"; id: string };
@@ -92,7 +99,7 @@ export interface Attachment {
   id?: string;
   name: string;
   size: number | string; // bytes; older example data stores a label
-  kind?: "text" | "pdf" | "docx" | "image";
+  kind?: "text" | "pdf" | "docx" | "image" | "sheet" | "slides" | "zip";
   mime?: string;
   text?: string; // extracted text, line- or page-numbered
   image?: string; // base64 without the data: prefix
@@ -121,6 +128,8 @@ export type TextMessage = Base & {
   via?: string;
   /** Files the agent made with make_file. */
   files?: MadeFile[];
+  /** A summary of the chat before it; replies see this instead of the older messages. */
+  summary?: boolean;
 };
 
 export type FileFormat = "md" | "docx" | "xlsx" | "pptx";
@@ -150,6 +159,8 @@ export interface MadeFile {
   title?: string;
   subtitle?: string;
   slides?: Slide[];
+  /** Desktop work mode: where the file was saved in the workspace. */
+  saved?: string;
 }
 
 export interface Source {
@@ -161,7 +172,7 @@ export interface Source {
 
 export interface ToolTrace {
   id: string;
-  name: "web_search" | "read_page" | "dispatch_to_group" | "make_file" | "use_skill" | "mcp" | LocalTool;
+  name: "web_search" | "read_page" | "dispatch_to_group" | "make_file" | "use_skill" | "install_skill" | "mcp" | LocalTool;
   /** One line for the UI, e.g. the search query or the group name. */
   label: string;
   /** "waiting": a local action waits for the user's approval. */
@@ -185,6 +196,8 @@ export interface Skill {
   description: string;
   body: string;
   enabled: boolean;
+  /** Desktop: the folder the skill came from, with its scripts and reference files. */
+  dir?: string;
 }
 
 /** An MCP server: remote over Streamable HTTP, or (desktop only) a local process over stdio. Its tools are offered to every agent. */

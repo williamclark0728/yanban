@@ -3,11 +3,12 @@ import { persist } from "zustand/middleware";
 import { presets, fromPreset } from "./lib/catalog";
 import { addExamples, db, ensureSeeded, getKv, setKv } from "./lib/db";
 import { isDesktop } from "./lib/desktop";
-import type { Agent, ChatRef, Group, McpServer, Message, ModelRef, Provider, Run, SearchConfig, Skill, TeamTemplate } from "./types";
+import { loadUsage } from "./lib/usage";
+import type { Agent, ChatRef, Group, McpServer, Message, ModelParams, ModelRef, Provider, Run, SearchConfig, Skill, TeamTemplate } from "./types";
 
 export type Theme = "dark" | "light" | "system";
 export type PanelTab = "info" | "members" | "runs" | "memory";
-export type SettingsTab = "general" | "providers" | "search" | "skills" | "mcp";
+export type SettingsTab = "general" | "providers" | "search" | "skills" | "mcp" | "usage";
 
 /** Desktop work mode: which local actions need the user's OK. Dangerous commands always do. */
 export type Approval = "ask" | "read" | "full";
@@ -121,7 +122,7 @@ interface Data {
   addAgent: (agent: Agent) => void;
   updateAgent: (id: string, patch: Partial<Agent>) => void;
   deleteAgent: (id: string) => void;
-  setParam: (agentId: string, key: keyof Agent["params"], value: number) => void;
+  setParam: <K extends keyof ModelParams>(agentId: string, key: K, value: ModelParams[K]) => void;
   addGroup: (group: Group) => void;
   updateGroup: (id: string, patch: Partial<Group>) => void;
   deleteGroup: (id: string) => void;
@@ -178,7 +179,7 @@ export const useData = create<Data>()((set, get) => ({
 
   load: async () => {
     await ensureSeeded();
-    const [agents, groups, messages, runs, providers, defaultModel, search, templates, skills, mcpServers] = await Promise.all([
+    const [stored, groups, messages, runs, providers, defaultModel, search, templates, skills, mcpServers, uncapped] = await Promise.all([
       db.agents.toArray(),
       db.groups.toArray(),
       db.messages.orderBy("at").toArray(),
@@ -189,7 +190,15 @@ export const useData = create<Data>()((set, get) => ({
       getKv<TeamTemplate[]>("templates", []),
       getKv<Skill[]>("skills", []),
       getKv<McpServer[]>("mcpServers", []),
+      getKv("uncapped", false),
     ]);
+    // Replies used to stop at 2048 tokens by default, which cut long files short. That default now means no cap.
+    const agents = uncapped ? stored : stored.map((a) => (a.params.maxTokens === 2048 ? { ...a, params: { ...a.params, maxTokens: 0 } } : a));
+    if (!uncapped) {
+      await db.agents.bulkPut(agents);
+      await setKv("uncapped", true);
+    }
+    void loadUsage(messages);
     // A reply that was streaming when the page closed ends as stopped, and so do its unfinished steps.
     const fixed = messages.map((m) =>
       m.kind === "text" && m.status === "streaming"

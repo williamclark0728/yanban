@@ -87,7 +87,7 @@ export const builtInTemplates: TeamTemplate[] = [
   },
 ];
 
-const defaults = { temperature: 0.7, topP: 1, maxTokens: 2048, history: 20 };
+const defaults = { temperature: 0.7, topP: 1, maxTokens: 0, history: 20 };
 
 /** The agent a template member would be: an existing one with the same name, or none (it will be created). */
 export const existingFor = (m: TemplateMember, agents: Agent[]) => agents.find((a) => a.name === m.name);

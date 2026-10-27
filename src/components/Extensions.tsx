@@ -1,10 +1,10 @@
 import { BookOpen, Download, FolderOpen, Pencil, Plug, Plus, Trash2, Upload } from "lucide-react";
 import { useRef, useState, type InputHTMLAttributes } from "react";
 import { importConfig, saveConfigFile } from "../lib/config";
-import { isDesktop } from "../lib/desktop";
+import { isDesktop, pickFolder } from "../lib/desktop";
 import { describeError } from "../lib/llm";
 import { testMcp } from "../lib/mcp";
-import { parseSkill } from "../lib/skills";
+import { parseSkill, skillsOnDisk } from "../lib/skills";
 import { useData } from "../store";
 import type { McpServer, Skill } from "../types";
 import { Field, inputCls, Row, StatusBox, type Status } from "./SettingsDialog";
@@ -112,7 +112,18 @@ export function SkillSettings() {
         技能用通用的 SKILL.md 格式（和 Claude、Codex 的技能一样）。智能体回复时能看到每个技能的名字和用途，需要时读取完整说明再照做。导入整个技能文件夹会找出其中所有的 SKILL.md。
       </p>
       <div className="flex flex-wrap gap-2">
-        <button type="button" className={outline} onClick={() => folder.current?.click()}>
+        <button
+          type="button"
+          className={outline}
+          onClick={() =>
+            // The desktop app reads the folder itself, so a skill keeps its scripts and reference files.
+            isDesktop
+              ? void pickFolder()
+                  .then((dir) => (dir ? skillsOnDisk(dir).then(add) : undefined))
+                  .catch((e: Error) => setStatus({ kind: "error", text: e.message }))
+              : folder.current?.click()
+          }
+        >
           <FolderOpen size={15} /> 导入技能文件夹
         </button>
         <button type="button" className={outline} onClick={() => files.current?.click()}>

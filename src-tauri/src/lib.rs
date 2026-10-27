@@ -1,3 +1,4 @@
+mod files;
 mod mcp;
 mod workspace;
 
@@ -6,6 +7,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(mcp::Servers::default())
         .invoke_handler(tauri::generate_handler![
             workspace::ws_list,
@@ -13,8 +16,12 @@ pub fn run() {
             workspace::ws_peek,
             workspace::ws_search,
             workspace::ws_write,
+            workspace::ws_write_bytes,
             workspace::ws_delete,
             workspace::run_command,
+            files::save_file,
+            files::reveal,
+            files::find_skills,
             mcp::mcp_start,
             mcp::mcp_send,
             mcp::mcp_stop,

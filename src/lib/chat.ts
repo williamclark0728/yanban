@@ -2,14 +2,16 @@ import type { ImagePart, ModelMessage, ToolSet, UserContent } from "ai";
 import { create } from "zustand";
 import { resolveModel, useData, usePrefs } from "../store";
 import type { Agent, Attachment, Group, Issue, Message, TextMessage } from "../types";
+import { AUTO_COMPACT, contextWindow, estimateTokens, sinceSummary, SUMMARY_PROMPT, TOOL_OVERHEAD } from "./context";
 import { attachmentText, hasImages } from "./files";
 import { dispatchRules, dispatchTools } from "./collab";
+import { isDesktop } from "./desktop";
 import { describeError, streamReply } from "./llm";
 import { mcpTools } from "./mcp";
 import { FILE_RULES, fileTools, filesText } from "./outputs";
 import { skillRules, skillTools } from "./skills";
 import { workRules, workTools } from "./workmode";
-import { NATIVE_WEB_RULES, tracer, WEB_RULES, webAccess, webPlan, type Report } from "./tools";
+import { NATIVE_WEB_RULES, NO_WEB_RULES, tracer, WEB_RULES, webAccess, webPlan, type Report } from "./tools";
 
 /** Chats with work in flight. One run per chat; stopping a chat aborts all of its replies. */
 export const useBusy = create<Record<string, boolean>>(() => ({}));
@@ -48,6 +50,7 @@ export function systemPrompt(agent: Agent) {
   if (agent.memory.length) lines.push("", "关于用户你已经知道：", ...agent.memory.map((m) => `- ${m}`));
   const web = webPlan(agent);
   if (web) lines.push("", web === "tools" ? WEB_RULES : NATIVE_WEB_RULES);
+  else if (agent.web) lines.push("", NO_WEB_RULES);
   lines.push("", `现在是${now()}。`, "用用户的语言回答，回答直接、具体。");
   return lines.join("\n");
 }
@@ -65,6 +68,7 @@ export function groupSystem(agent: Agent, group: Group) {
     `你在群聊「${group.name}」中。其他成员：${others.map((a) => `${a.name}（${a.tagline}）`).join("、") || "无"}。`,
     "聊天记录里【名字】表示发言人，【用户】是向大家提需求的人。",
     `只以「${agent.name}」的身份发言，不替别人发言，开头不要写自己的名字。`,
+    ...(group.workspace && isDesktop ? [`本群开启了工作模式，工作区是 ${group.workspace}：成员能读写其中的文件、运行命令，生成的文件会存进去。`] : []),
   ].join("\n");
 }
 
@@ -122,10 +126,10 @@ export function latestImages(messages: Message[]): ImagePart[] {
 export const userContent = (text: string, images: ImagePart[]): ModelMessage["content"] & UserContent =>
   images.length ? [{ type: "text", text }, ...images] : text;
 
-/** The last `limit` finished turns of a private chat, oldest first. */
+/** The last `limit` finished turns of a private chat since its latest summary, oldest first. */
 export function privateHistory(messages: Message[], chat: string, limit: number): ModelMessage[] {
-  const recent = messages
-    .filter((m): m is TextMessage => m.chat === chat && m.kind === "text" && m.status !== "error" && m.status !== "streaming" && (!!m.text || !!m.attachments?.length))
+  const recent = sinceSummary(messages.filter((m) => m.chat === chat))
+    .rest.filter((m): m is TextMessage => m.kind === "text" && !m.summary && m.status !== "error" && m.status !== "streaming" && (!!m.text || !!m.attachments?.length))
     .slice(-limit);
   const lastUser = recent.findLastIndex((m) => m.sender === "me");
   const turns = recent.map<ModelMessage>((m, i) =>
@@ -147,18 +151,19 @@ export const formatIssue = (i: Issue) => `[${issueTag[i.status]}] ${i.text}${i.e
  * before it only the last `limit` messages.
  */
 export function transcript(chat: string, limit: number, sinceId?: string) {
-  const all = useData.getState().messages.filter((m) => m.chat === chat);
+  const { summary, rest: all } = sinceSummary(useData.getState().messages.filter((m) => m.chat === chat));
   const found = sinceId ? all.findIndex((m) => m.id === sinceId) : -1;
   const start = found >= 0 ? found : all.length;
   const line = (m: Message) => {
     if (m.kind === "round") return `【系统】第 ${m.round} 轮：${m.note}`;
-    if (m.kind === "text" && (m.status === "streaming" || m.status === "error")) return null;
+    if (m.kind === "text" && (m.status === "streaming" || m.status === "error" || m.summary)) return null;
     if (!m.text && !(m.kind === "text" && (m.attachments?.length || m.files?.length))) return null;
     const who = m.sender === "me" ? "用户" : (agentById(m.sender)?.name ?? m.sender);
     const body = m.kind === "text" ? [withFiles(m), filesText(m.files)].filter(Boolean).join("\n\n") : [m.text, ...m.issues.map((i) => `- ${formatIssue(i)}`)].join("\n");
     return `【${who}】${body}`;
   };
   const lines = [...all.slice(0, start).map(line).filter(Boolean).slice(-limit), ...all.slice(start).map(line).filter(Boolean)];
+  if (summary) lines.unshift(`【系统】更早的对话已压缩，摘要：\n${summary.text}`);
   return `群聊记录（${lines.length} 条）：\n\n${lines.join("\n\n")}`;
 }
 
@@ -206,8 +211,8 @@ export async function speak(opts: {
   const web = webAccess(opts.agent, report);
   const tools = {
     ...web.tools,
-    ...fileTools(id, report),
-    ...skillTools(report),
+    ...fileTools(id, report, opts.agent),
+    ...skillTools(report, opts.agent),
     ...workTools(opts.agent, report),
     ...(await mcpTools(report)),
     ...opts.extraTools?.(report),
@@ -274,6 +279,7 @@ export async function speak(opts: {
 // ---------- private chat ----------
 
 export async function sendToAgent(agentId: string, text: string, attachments?: Attachment[]) {
+  await autoCompact(agentId);
   useData.getState().addMessage({ id: uid(), chat: agentId, kind: "text", sender: "me", text, attachments, at: Date.now() });
   await reply(agentId);
 }
@@ -285,13 +291,15 @@ export async function reply(agentId: string) {
   try {
     const { messages, groups } = useData.getState();
     const context = privateHistory(messages, agentId, agent.params.history);
+    const { summary } = sinceSummary(messages.filter((m) => m.chat === agentId));
+    const base = summary ? `${systemPrompt(agent)}\n\n更早的对话已压缩，摘要如下（原文已不在上下文里）：\n${summary.text}` : systemPrompt(agent);
     // A lead can hand work to the groups it runs, taking along the files from the user's latest message.
     const led = groups.filter((g) => g.leadId === agent.id);
     const asked = messages.findLast((m): m is TextMessage => m.chat === agentId && m.kind === "text" && m.sender === "me");
     await speak({
       chat: agentId,
       agent,
-      system: led.length ? `${systemPrompt(agent)}\n\n${dispatchRules(led)}` : systemPrompt(agent),
+      system: led.length ? `${base}\n\n${dispatchRules(led)}` : base,
       messages: context,
       signal: c.signal,
       extraTools: led.length ? (report) => dispatchTools(agent, led, report, asked?.attachments) : undefined,
@@ -299,6 +307,95 @@ export async function reply(agentId: string) {
   } finally {
     end(agentId);
   }
+}
+
+// ---------- context size and compression ----------
+
+/** Who answers in a chat: the agent, or the group's lead. */
+function speaker(chat: string) {
+  const group = useData.getState().groups.find((g) => g.id === chat);
+  const agent = agentById(group ? group.leadId : chat);
+  return agent ? { agent, group } : null;
+}
+
+const plainText = (m: ModelMessage) =>
+  typeof m.content === "string" ? m.content : m.content.map((p) => (p.type === "text" ? p.text : p.type === "image" ? "x".repeat(3000) : "")).join("");
+
+/** Roughly how full the next request would be: system prompt, recent messages, tool definitions. */
+export function contextUse(chat: string) {
+  const who = speaker(chat);
+  const { messages, providers, defaultModel } = useData.getState();
+  const target = who && resolveModel(who.agent, providers, defaultModel);
+  if (!who || !target) return null;
+  const { agent, group } = who;
+  const { summary, rest } = sinceSummary(messages.filter((m) => m.chat === chat));
+  const history = group ? transcript(chat, agent.params.history) : privateHistory(messages, chat, agent.params.history).map(plainText).join("\n");
+  const system = [group ? groupSystem(agent, group) : systemPrompt(agent), FILE_RULES, skillRules(), !group && summary?.text].filter(Boolean).join("\n");
+  return {
+    used: estimateTokens(system + history) + TOOL_OVERHEAD,
+    window: contextWindow(target.modelId),
+    model: target.modelId,
+    /** Messages since the last summary; compressing fewer than a few is pointless. */
+    pending: rest.filter((m) => m.kind !== "round").length,
+  };
+}
+
+/** Writes a summary of the chat so far; later replies see the summary instead of the messages before it. */
+export async function compact(chat: string) {
+  const who = speaker(chat);
+  const { messages, providers, defaultModel, addMessage, patchMessage } = useData.getState();
+  const target = who && resolveModel(who.agent, providers, defaultModel);
+  if (!who || !target) return false;
+  const c = begin(chat);
+  if (!c) return false;
+  const { agent, group } = who;
+  const own = messages.filter((m) => m.chat === chat);
+  const { summary, rest } = sinceSummary(own);
+  let text = group
+    ? transcript(chat, 100_000)
+    : [
+        summary && `【之前的摘要】${summary.text}`,
+        ...rest
+          .filter((m): m is TextMessage => m.kind === "text" && !m.summary && m.status !== "streaming" && m.status !== "error")
+          .map((m) => `【${m.sender === "me" ? "用户" : agent.name}】${[withFiles(m), filesText(m.files)].filter(Boolean).join("\n\n")}`),
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+  // Keep the newest part if the conversation is larger than the model can read at once.
+  const room = contextWindow(target.modelId) * 0.7;
+  while (estimateTokens(text) > room) text = text.slice(Math.floor(text.length * 0.2));
+
+  const id = uid();
+  addMessage({ id, chat, kind: "text", sender: agent.id, text: "", summary: true, status: "streaming", at: Date.now() });
+  let out = "";
+  try {
+    const r = await streamReply({
+      provider: target.provider,
+      modelId: target.modelId,
+      system: "你负责把一段对话压缩成摘要，供之后的对话接着用。",
+      messages: [{ role: "user", content: `${text}\n\n${SUMMARY_PROMPT}` }],
+      params: { ...agent.params, temperature: 0.2 },
+      signal: c.signal,
+      onText: (d) => {
+        out += d;
+        patchMessage(id, { text: out });
+      },
+      onReasoning: () => {},
+    });
+    patchMessage(id, { text: stripThink(out), status: undefined, usage: { model: target.modelId, input: r.input, output: r.output, seconds: r.seconds } }, true);
+    return true;
+  } catch (e) {
+    patchMessage(id, { text: out, status: c.signal.aborted ? "stopped" : "error", error: describeError(e) }, true);
+    return false;
+  } finally {
+    end(chat);
+  }
+}
+
+/** Compresses before the next message when the context is nearly full, like the CLI agents do. */
+export async function autoCompact(chat: string) {
+  const use = contextUse(chat);
+  if (use && use.pending >= 4 && use.used > use.window * AUTO_COMPACT) await compact(chat);
 }
 
 /** Drops a failed private reply and asks again with the same context. */

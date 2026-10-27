@@ -81,7 +81,7 @@ export function DetailPanel() {
 const nameOf = (agents: Agent[], id: string) => agents.find((a) => a.id === id)?.name ?? id;
 
 function GroupInfo({ group }: { group: Group }) {
-  const { setConsensus, setMaxRounds, runs } = useData();
+  const { setConsensus, setMaxRounds, updateGroup, runs } = useData();
   const dev = usePrefs((s) => s.mode === "dev");
   const groupRuns = runs.filter((r) => r.groupId === group.id);
   return (
@@ -129,6 +129,10 @@ function GroupInfo({ group }: { group: Group }) {
             </p>
           </div>
         </Card>
+      </div>
+      <div>
+        <Label>能力</Label>
+        <WorkMode group value={group.workspace} onChange={(workspace) => updateGroup(group.id, { workspace })} />
       </div>
       {dev && (
         <div>
@@ -227,41 +231,7 @@ function AgentInfo({ agent }: { agent: Agent }) {
           </div>
           <Switch checked={!!agent.web} onChange={(web) => updateAgent(agent.id, { web })} label="联网搜索" />
         </Card>
-        {!isDesktop && (
-          <Card className="mt-2 flex items-center gap-3 px-4 py-3">
-            <div className="min-w-0 flex-1">
-              <div className="font-medium">工作模式</div>
-              <div className="text-[13px] text-fg-3">在 Windows 桌面版里读写本机文件夹、运行命令</div>
-            </div>
-            <a href={DESKTOP_DOWNLOAD} className="shrink-0 rounded-full border border-line-2 px-3 py-1.5 text-[13px] font-medium hover:bg-hover">
-              下载桌面版
-            </a>
-          </Card>
-        )}
-        {isDesktop && (
-          <Card className="mt-2 flex items-center gap-3 px-4 py-3">
-            <div className="min-w-0 flex-1">
-              <div className="font-medium">工作模式</div>
-              {agent.workspace ? (
-                <button
-                  type="button"
-                  title="换一个文件夹"
-                  onClick={() => pickFolder().then((workspace) => workspace && updateAgent(agent.id, { workspace }))}
-                  className="block max-w-full truncate text-left font-mono text-[12.5px] text-accent-text hover:underline"
-                >
-                  {agent.workspace}
-                </button>
-              ) : (
-                <div className="text-[13px] text-fg-3">选一个文件夹，读写其中的文件、运行命令；修改前可看差异、可撤销</div>
-              )}
-            </div>
-            <Switch
-              checked={!!agent.workspace}
-              onChange={(on) => (on ? pickFolder().then((workspace) => workspace && updateAgent(agent.id, { workspace })) : updateAgent(agent.id, { workspace: undefined }))}
-              label="工作模式"
-            />
-          </Card>
-        )}
+        <WorkMode value={agent.workspace} onChange={(workspace) => updateAgent(agent.id, { workspace })} />
       </div>
       <div>
         <Label>角色设定</Label>
@@ -280,7 +250,7 @@ function AgentInfo({ agent }: { agent: Agent }) {
           <Card className="space-y-4 px-4 py-4">
             <Slider label="temperature" value={agent.params.temperature} min={0} max={2} step={0.1} onChange={(v) => setParam(agent.id, "temperature", v)} />
             <Slider label="top_p" value={agent.params.topP} min={0} max={1} step={0.05} onChange={(v) => setParam(agent.id, "topP", v)} />
-            <Slider label="max_tokens" value={agent.params.maxTokens} min={256} max={8192} step={256} onChange={(v) => setParam(agent.id, "maxTokens", v)} />
+            <Slider label="max_tokens" value={agent.params.maxTokens} min={0} max={65536} step={1024} format={(v) => (v ? String(v) : "不限")} onChange={(v) => setParam(agent.id, "maxTokens", v)} />
             <Slider label="上下文条数" value={agent.params.history} min={2} max={60} step={2} onChange={(v) => setParam(agent.id, "history", v)} />
           </Card>
         </div>
@@ -289,12 +259,47 @@ function AgentInfo({ agent }: { agent: Agent }) {
   );
 }
 
-function Slider(props: { label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void }) {
+/** The work-mode folder of an agent or a group; on the website, a pointer to the desktop app. */
+function WorkMode({ value, onChange, group }: { value?: string; onChange: (workspace: string | undefined) => void; group?: boolean }) {
+  if (!isDesktop) {
+    return (
+      <Card className="mt-2 flex items-center gap-3 px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <div className="font-medium">工作模式</div>
+          <div className="text-[13px] text-fg-3">在 Windows 桌面版里读写本机文件夹、运行命令</div>
+        </div>
+        <a href={DESKTOP_DOWNLOAD} className="shrink-0 rounded-full border border-line-2 px-3 py-1.5 text-[13px] font-medium hover:bg-hover">
+          下载桌面版
+        </a>
+      </Card>
+    );
+  }
+  const pick = () => pickFolder().then((folder) => folder && onChange(folder));
+  return (
+    <Card className="mt-2 flex items-center gap-3 px-4 py-3">
+      <div className="min-w-0 flex-1">
+        <div className="font-medium">工作模式</div>
+        {value ? (
+          <button type="button" title="换一个文件夹" onClick={pick} className="block max-w-full truncate text-left font-mono text-[12.5px] text-accent-text hover:underline">
+            {value}
+          </button>
+        ) : (
+          <div className="text-[13px] text-fg-3">
+            {group ? "全体成员在一个文件夹里读写文件、运行命令，生成的文件直接存进去" : "选一个文件夹，读写其中的文件、运行命令；修改前可看差异、可撤销"}
+          </div>
+        )}
+      </div>
+      <Switch checked={!!value} onChange={(on) => (on ? void pick() : onChange(undefined))} label="工作模式" />
+    </Card>
+  );
+}
+
+function Slider(props: { label: string; value: number; min: number; max: number; step: number; format?: (v: number) => string; onChange: (v: number) => void }) {
   return (
     <label className="block">
       <div className="mb-1.5 flex justify-between text-sm">
         <span className="font-mono text-fg-2">{props.label}</span>
-        <span className="font-mono tabular-nums">{props.value}</span>
+        <span className="font-mono tabular-nums">{props.format ? props.format(props.value) : props.value}</span>
       </div>
       <input
         type="range"

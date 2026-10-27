@@ -130,7 +130,7 @@ const templates: { label: string; tagline: string; role: RoleCard }[] = [
   },
 ];
 
-const defaults = { temperature: 0.7, topP: 1, maxTokens: 2048, history: 20 };
+const defaults = { temperature: 0.7, topP: 1, maxTokens: 0, history: 20 };
 
 function AgentEditor({ id, onClose }: { id?: string; onClose: () => void }) {
   const { agents, providers, defaultModel, addAgent, updateAgent, deleteAgent } = useData();

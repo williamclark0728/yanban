@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { AlertCircle, Brain, Check, CheckCircle2, ChevronDown, Copy, FileDown, RotateCcw, RotateCw, Square } from "lucide-react";
+import { AlertCircle, Archive, Brain, Check, CheckCircle2, ChevronDown, Copy, FileDown, Loader2, RotateCcw, RotateCw, Square } from "lucide-react";
 import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -199,7 +199,7 @@ function Failure({ msg }: { msg: Extract<Message, { kind: "text" }> }) {
       </div>
       {dev && msg.error?.detail && <div className="mt-1 break-all font-mono text-xs text-fg-2">{msg.error.detail}</div>}
       <div className="mt-2 flex gap-2 empty:hidden">
-        {msg.chat === msg.sender && (
+        {msg.chat === msg.sender && !msg.summary && (
           <button
             type="button"
             onClick={() => retry(msg.id)}
@@ -218,6 +218,34 @@ function Failure({ msg }: { msg: Extract<Message, { kind: "text" }> }) {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Where the chat was compressed: later replies see this summary instead of the messages above it. */
+function Summary({ msg, agents }: { msg: Extract<Message, { kind: "text" }>; agents: Agent[] }) {
+  const working = msg.status === "streaming";
+  const failed = msg.status === "error" || msg.status === "stopped";
+  return (
+    <div className="my-5 px-2">
+      <div className="flex items-center gap-3 text-xs text-fg-3">
+        <span className="h-px flex-1 bg-line" />
+        {working ? <Loader2 size={13} className="animate-spin" /> : <Archive size={13} />}
+        {working ? "正在压缩之前的对话…" : failed ? "压缩没有完成，之前的对话照常保留" : "之前的对话已压缩，之后的回复只带这份摘要"}
+        <span className="h-px flex-1 bg-line" />
+      </div>
+      {msg.text && !failed && (
+        <details className="group/s mx-auto mt-2 max-w-[680px] rounded-2xl border border-line bg-raise px-4 py-2.5 text-sm">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 font-medium select-none">
+            查看摘要
+            <ChevronDown size={14} className="transition-transform group-open/s:rotate-180" />
+          </summary>
+          <div className="mt-2">
+            <RichText text={msg.text} agents={agents} />
+          </div>
+        </details>
+      )}
+      {msg.status === "error" && <Failure msg={msg} />}
     </div>
   );
 }
@@ -280,11 +308,13 @@ export function MessageItem({
               <RichText text={msg.text} agents={agents} />
             </div>
           )}
-          <Meta time={time} align="right" />
+          <Meta time={time} align="right" copy={msg.text || undefined} />
         </div>
       </div>
     );
   }
+
+  if (msg.kind === "text" && msg.summary) return <Summary msg={msg} agents={agents} />;
 
   const streaming = msg.kind === "text" && msg.status === "streaming";
   const failed = msg.kind === "text" && msg.status === "error";

@@ -1,7 +1,9 @@
 import { jsonSchema, tool, type ToolSet } from "ai";
 import { useData } from "../store";
-import type { FileFormat, MadeFile } from "../types";
+import type { Agent, FileFormat, MadeFile } from "../types";
+import { call, isDesktop, saveAs } from "./desktop";
 import type { Report } from "./tools";
+import { approve, hasWorkspace } from "./workmode";
 
 export const FORMATS: Record<FileFormat, string> = { md: "Markdown", docx: "Word 文档", xlsx: "Excel 表格", pptx: "PPT" };
 
@@ -10,6 +12,8 @@ export const FILE_RULES = [
   "- docx / md：markdown 写完整正文，可以用标题、列表、表格、加粗。",
   "- xlsx：sheets 写每个工作表，rows 的第一行是表头；单元格都写成字符串，纯数字会自动存成数字。",
   "- pptx：title、subtitle 是封面；slides 每页写 title、bullets（3–6 条，每条一句话）和 notes（这一页的讲稿）。版式由程序套用，不用写格式。",
+  "文件生成后显示为回复里的文件卡片，用户点开能逐页预览，点下载按钮就能保存；工作模式下还会自动存进工作区。所以你能交付文件，不要说环境不支持文件。",
+  "只有 make_file 返回“已生成”才算成功；返回“没有生成”时按提示改好再调用，不要声称已经生成。",
   "调用后在回复里用一两句话说明文件内容，不要把全文再贴一遍。用户没要文件时不要调用。",
 ].join("\n");
 
@@ -81,8 +85,19 @@ export function toFile(input: Input): MadeFile | string {
   return f;
 }
 
+/** Work mode: builds the file and saves it in the workspace, after the user's OK. Returns where it went. */
+async function saveToWorkspace(f: MadeFile, agent: Agent, report: Report, step: Parameters<Report>[0], signal?: AbortSignal) {
+  const root = agent.workspace!;
+  const path = fileName(f);
+  if (!(await approve(report, step, "change", { what: `把 ${path} 保存到工作区` }, signal))) return null;
+  const { buildFile } = await import("./filegen");
+  const data = Array.from(new Uint8Array(await (await buildFile(f)).arrayBuffer()));
+  await call("ws_write_bytes", { root, path, data });
+  return `${root.replace(/[\\/]+$/, "").replace(/\//g, "\\")}\\${path}`;
+}
+
 /** make_file: the agent writes the content, the browser builds the file when the user downloads it. */
-export function fileTools(messageId: string, report: Report): ToolSet {
+export function fileTools(messageId: string, report: Report, agent?: Agent): ToolSet {
   return {
     make_file: tool({
       description: "生成一个文件（Word、Excel、PPT 或 Markdown），附在你的回复里供用户预览和下载。",
@@ -122,33 +137,48 @@ export function fileTools(messageId: string, report: Report): ToolSet {
         },
         required: ["format", "name"],
       }),
-      execute: async (input, { toolCallId }) => {
+      execute: async (input, { toolCallId, abortSignal }) => {
         const f = toFile(input);
         const base = { id: toolCallId, name: "make_file" as const, label: typeof f === "string" ? str(input.name) || "文件" : fileName(f) };
         if (typeof f === "string") {
           report({ ...base, status: "error", detail: f });
           return `没有生成：${f}。补全后再调用一次。`;
         }
+        let where = "";
+        if (agent && hasWorkspace(agent)) {
+          try {
+            const saved = await saveToWorkspace(f, agent, report, { ...base, status: "running" }, abortSignal);
+            if (saved) {
+              f.saved = saved;
+              where = `，并已保存到工作区 ${saved}`;
+            } else where = "，用户没有同意存进工作区（可以在文件卡片上下载）";
+          } catch (e) {
+            where = `，但存进工作区失败：${(e as Error).message}`;
+          }
+        }
         const { messages, patchMessage } = useData.getState();
         const msg = messages.find((m) => m.id === messageId);
         const files = msg?.kind === "text" ? (msg.files ?? []) : [];
         patchMessage(messageId, { files: [...files.filter((x) => fileName(x) !== fileName(f)), f] }, true);
-        report({ ...base, status: "done", detail: describeFile(f) });
-        return `已生成 ${fileName(f)}（${describeFile(f)}），附在你的回复里。`;
+        report({ ...base, status: "done", detail: f.saved ? `${describeFile(f)}，已存进工作区` : describeFile(f) });
+        return `已生成 ${fileName(f)}（${describeFile(f)}），附在你的回复里${where}。`;
       },
     }),
   };
 }
 
-/** Builds the file (the libraries load only now) and saves it. */
-export async function download(f: MadeFile) {
+/** Builds the file (the libraries load only now) and saves it. The desktop app asks where and returns the path. */
+export async function download(f: MadeFile): Promise<string | null> {
   const { buildFile } = await import("./filegen");
-  const url = URL.createObjectURL(await buildFile(f));
+  const blob = await buildFile(f);
+  if (isDesktop) return saveAs(fileName(f), blob);
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = fileName(f);
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  return null;
 }
 
 /** A reply saved as a Word document, named after its first line. */

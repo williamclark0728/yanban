@@ -1,6 +1,6 @@
 import type { Agent, Group, Message, Run } from "../types";
 
-const defaults = { temperature: 0.7, topP: 1, maxTokens: 2048, history: 20 };
+const defaults = { temperature: 0.7, topP: 1, maxTokens: 0, history: 20 };
 
 export const seedAgents: Agent[] = [
   {

@@ -7,6 +7,7 @@ import { resolveModel, useData, usePrefs, useUi } from "../store";
 import type { Attachment, Message } from "../types";
 import { BotAvatar, GroupAvatar } from "./Avatar";
 import { Composer, type ComposerHandle } from "./Composer";
+import { ContextMeter, EffortChip } from "./ContextMeter";
 import { MessageItem } from "./MessageItem";
 import { ModelChip } from "./ModelChip";
 import { IconButton } from "./ui";
@@ -87,7 +88,7 @@ export function ChatView() {
           <div className="flex flex-col items-center gap-2 text-accent-text">
             <FileUp size={32} />
             <span className="font-medium">松开即可添加文件</span>
-            <span className="text-[13px] opacity-80">文本、PDF、Word 或图片</span>
+            <span className="text-[13px] opacity-80">文本、代码、PDF、Word、Excel、PPT、zip 或图片</span>
           </div>
         </div>
       )}
@@ -171,7 +172,15 @@ export function ChatView() {
           placeholder={group ? `发消息给 ${name}，@ 可指定成员` : `发消息给 ${name}`}
           members={members}
           busy={busy}
-          tools={agent && <ModelChip agent={agent} />}
+          tools={
+            agent && (
+              <>
+                <ModelChip agent={agent} />
+                <EffortChip agent={agent} />
+              </>
+            )
+          }
+          trailing={<ContextMeter chat={chatId} />}
           onStop={() => stop(chatId)}
           onSend={send}
         />

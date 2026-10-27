@@ -36,7 +36,7 @@ const unknownAgent: Agent = {
   model: null,
   memory: [],
   role: { duty: "", scope: "", io: "", protocol: "" },
-  params: { temperature: 0.7, topP: 1, maxTokens: 2048, history: 20 },
+  params: { temperature: 0.7, topP: 1, maxTokens: 0, history: 20 },
 };
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;

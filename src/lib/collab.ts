@@ -3,6 +3,7 @@ import { resolveModel, useData } from "../store";
 import type { Agent, Attachment, Baseline, Group, Issue, IssueStatus, Message, Run, RunRound, RunStep, TextMessage } from "../types";
 import {
   agentById,
+  autoCompact,
   begin,
   end,
   formatIssue,
@@ -243,10 +244,15 @@ export async function sendToGroup(groupId: string, text: string, attachments?: A
   const { groups, addMessage } = useData.getState();
   const group = groups.find((g) => g.id === groupId);
   if (!group) return null;
+  if (!useBusy.getState()[groupId]) await autoCompact(groupId);
   const messageId = uid();
   addMessage({ id: messageId, chat: groupId, kind: "text", sender: "me", text, attachments, via, at: Date.now() });
 
-  const members = group.memberIds.map(agentById).filter((a): a is Agent => !!a);
+  // A group in work mode lends its folder to every member for this conversation.
+  const members = group.memberIds
+    .map(agentById)
+    .filter((a): a is Agent => !!a)
+    .map((a) => (group.workspace ? { ...a, workspace: group.workspace } : a));
   const lead = members.find((m) => m.id === group.leadId) ?? members[0];
   if (!lead) return null;
   if (!via && text.includes(`@${ALL}`)) {

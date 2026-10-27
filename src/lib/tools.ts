@@ -43,9 +43,13 @@ export const WEB_RULES = [
 ].join("\n");
 
 export const NATIVE_WEB_RULES = [
-  "你可以联网搜索。",
+  "你可以联网搜索：搜索由模型服务自动完成，搜到的资料会直接提供给你，所以你没有单独的搜索工具，但确实能联网。不要说自己不能联网。",
   "需要最新信息、具体数据、新闻或你不确定的事实时，先搜索再回答；常识问题不用搜。回答里注明信息来源。",
 ].join("\n");
+
+/** The user turned web search on, but neither the model nor a search service can do it. */
+export const NO_WEB_RULES =
+  "用户为你打开了联网搜索，但当前模型不自带搜索，也还没连接搜索服务，所以这次不能联网。需要最新信息时如实说明，并告诉用户：在 设置 → 联网搜索 里连接一个搜索服务（博查、Tavily 等），或换一个自带搜索的模型（通义千问、智谱、Kimi、Gemini 3）。";
 
 const NATIVE_LABEL: Record<NativeSearch, string> = { qwen: "通义千问", zhipu: "智谱", kimi: "Kimi", gemini: "Google" };
 

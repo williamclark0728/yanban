@@ -51,7 +51,8 @@
 1. 下载 [Yanban-Windows-x64-setup.exe](https://github.com/williamclark0728/yanban/releases/latest/download/Yanban-Windows-x64-setup.exe)（Windows 10 / 11，64 位），双击安装。
 2. 安装包没有代码签名，Windows 弹出「Windows 已保护你的电脑」时，点 **更多信息 → 仍要运行**。
 3. 在 设置 → 模型服务 里填自己的 API Key（桌面版没有体验模型）。网页版配好的，可以在网页版 设置 → 通用 导出配置，再到桌面版导入。
-4. 打开智能体资料里的「工作模式」，选一个文件夹，就能让它在里面干活。
+4. 打开智能体资料（或群资料）里的「工作模式」，选一个文件夹，就能让它在里面干活；群开了工作模式，全体成员共用这个文件夹，生成的文件直接存进去。
+5. 0.2.0 起有新版本时，左下角会提示「更新并重启」，点一下就装好。
 
 **开源、免费（MIT 协议）**。欢迎 Star、提 Issue，一起把它做得更好用。
 
@@ -66,7 +67,11 @@
 - 联网搜索：给智能体打开「联网搜索」即可用本站提供的搜索（每天限次）；在 设置 → 联网搜索 里连接自己的博查、Tavily 或自建 SearXNG 后不限次。读网页全文用 Jina Reader。回答里的 [n] 链接到对应来源。模型不支持工具调用时自动改为直接回答。
 - 共识规则：严格（成立和存疑都要解决）或宽松（没有成立的疑点即通过），记录里可以对比两种规则的接受率。
 - 协作记录：逐轮留痕，单 Agent 对照（同一任务单独完成，再用同样的标准审查），导出 Markdown 或 JSON。
-- 文件：文本、PDF（含中文）、Word、图片，可以选择文件、拖放或粘贴。
+- 文件：文本和代码、PDF（含中文）、Word、Excel、PPT、zip 压缩包（列出全部文件并读出其中的文档）、图片，可以选择文件、拖放或粘贴。
+- 上下文：输入框右侧的圆环显示上下文用了多少，点开可以手动压缩；快满时发消息前自动把之前的对话压缩成摘要。
+- 思考强度：输入框里选默认、不思考、低、中、高、最高，按各家服务的参数发送（通义、智谱用自己的开关，其余用 reasoning_effort 或思考预算）。
+- 用量：设置 → 用量，看今天、最近 7 天和每天的 token，按模型分开统计。
+- 技能安装：让智能体“安装这个技能”，它会调用 install_skill 长期保存，所有智能体都能用；桌面版保留技能文件夹，参考文件和脚本照样能用。
 - 模型服务：内置 DeepSeek、通义百炼、Kimi、智谱、豆包、硅基流动、OpenAI、Anthropic、Gemini、OpenRouter、NVIDIA、Ollama，也可以添加自定义服务。支持 OpenAI Chat、OpenAI Responses、Anthropic Messages、Gemini 四种协议。
 - 文件产出：Word（docx）、Excel（SheetJS）、PPT（pptxgenjs，内置版式）、Markdown，消息里预览，下载时在浏览器里生成；任何回复都能下载为 Word。
 - 技能（SKILL.md）、远程 MCP（Streamable HTTP）、配置导入导出；模型自带联网（通义千问、智谱、Kimi、Gemini 3）。
@@ -93,6 +98,7 @@ npm run dev
 | `node scripts/mock-llm.mjs` | 本机模拟模型服务，Base URL 填 `http://127.0.0.1:5199/v1`，会扮演主持人和审查人 |
 | `npm run desktop:dev` | 运行桌面版（需要 Rust 和 VS 生成工具的 C++ 组件） |
 | `npm run desktop:build` | 打包桌面版安装包，输出在 `src-tauri/target/release/bundle/nsis/` |
+| `npm run desktop:release -- "更新说明"` | 打签名安装包并发布 GitHub Release（附 `latest.json`，已安装的桌面版据此提示更新）；需要本机的签名私钥 `~/.tauri/yanban.key` |
 
 ## 数据与密钥
 

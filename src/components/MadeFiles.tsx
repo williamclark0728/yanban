@@ -1,8 +1,9 @@
 import clsx from "clsx";
-import { Download, FileSpreadsheet, FileText, Loader2, Presentation, X } from "lucide-react";
+import { Download, FileSpreadsheet, FileText, FolderOpen, Loader2, Presentation, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { isDesktop, reveal } from "../lib/desktop";
 import { describeFile, download, fileName, FORMATS } from "../lib/outputs";
 import type { FileFormat, MadeFile } from "../types";
 import { IconButton, Tabs } from "./ui";
@@ -16,14 +17,17 @@ function FormatIcon({ format, size = 16 }: { format: FileFormat; size?: number }
 function useDownload(file: MadeFile) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Desktop: where the file is on disk, from the workspace save or the save dialog.
+  const [path, setPath] = useState(file.saved ?? "");
   const save = () => {
     setBusy(true);
     setError("");
     download(file)
+      .then((p) => p && setPath(p))
       .catch((e: Error) => setError(e.message || "生成失败"))
       .finally(() => setBusy(false));
   };
-  return { busy, error, save };
+  return { busy, error, save, path };
 }
 
 /** Files an agent made: open a preview, or download the real file. */
@@ -39,7 +43,7 @@ export function MadeFiles({ files }: { files: MadeFile[] }) {
 
 function FileTile({ file }: { file: MadeFile }) {
   const [open, setOpen] = useState(false);
-  const { busy, error, save } = useDownload(file);
+  const { busy, error, save, path } = useDownload(file);
   return (
     <>
       <div className="flex w-[280px] max-w-full items-center gap-2.5 rounded-2xl border border-line bg-raise py-2 pl-2 pr-1.5">
@@ -50,10 +54,15 @@ function FileTile({ file }: { file: MadeFile }) {
           <span className="min-w-0">
             <span className="block truncate text-sm font-medium">{fileName(file)}</span>
             <span className={clsx("block truncate text-xs", error ? "text-bad" : "text-fg-3")}>
-              {error || `${FORMATS[file.format]} · ${describeFile(file)}`}
+              {error || (path ? `已保存 · ${path}` : `${FORMATS[file.format]} · ${describeFile(file)}`)}
             </span>
           </span>
         </button>
+        {isDesktop && path && (
+          <IconButton aria-label="在文件夹中显示" title="在文件夹中显示" onClick={() => void reveal(path)}>
+            <FolderOpen size={17} />
+          </IconButton>
+        )}
         <IconButton aria-label="下载" title="下载" onClick={save} disabled={busy}>
           {busy ? <Loader2 size={17} className="animate-spin" /> : <Download size={17} />}
         </IconButton>

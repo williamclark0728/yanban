@@ -9,6 +9,7 @@
 - 不用真实 Key 的端到端测试：`node scripts/mock-llm.mjs`，在设置里添加自定义服务，Base URL 填 `http://127.0.0.1:5199/v1`。它能扮演主持人（返回分工 JSON）和审查人（第 1 轮报问题，第 2 轮通过）；群聊里说「自我介绍」走各自发言、说「先搜集」走两人流水线；消息含「搜索」时调用 web_search，含「交给群」时调用 dispatch_to_group，含「生成 Word / Excel / PPT」时调用 make_file，含「技能」时调用 use_skill，含「查论文」时调用模拟 MCP 服务（`http://127.0.0.1:5199/mcp`）的 lookup_paper；模型 `mock-plain` 模拟不支持工具。搜索服务选 SearXNG、地址填 `http://127.0.0.1:5199` 即可用模拟搜索
 - 线上环境预演：`npm run build && npx wrangler pages dev dist --port 8788`
 - 桌面版：需要 Rust（MSVC 工具链）和 VS 生成工具的 C++ 组件。`npm run desktop:dev` 开发，`npm run desktop:build` 打安装包（`src-tauri/target/release/bundle/nsis/`）。Rust 测试：`cargo test --manifest-path src-tauri/Cargo.toml`
+- 发布桌面版：先改 `src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`package.json` 里的版本号并提交推送，再 `npm run desktop:release -- "更新说明"`。它用 `~/.tauri/yanban.key`（不在仓库里，丢了就没法给已安装的版本推更新）签名，上传 `Yanban-Windows-x64-setup.exe` 和 `latest.json`；应用内更新读 `releases/latest/download/latest.json`。
 
 ## 代码地图
 

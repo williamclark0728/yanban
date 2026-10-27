@@ -155,6 +155,21 @@ pub async fn ws_write(root: String, path: String, content: String) -> Result<Opt
     Ok(before)
 }
 
+/// Saves a generated file (Word, Excel, PPT) into the workspace. Returns whether it replaced an existing file.
+#[tauri::command]
+pub async fn ws_write_bytes(root: String, path: String, data: Vec<u8>) -> Result<bool, String> {
+    let file = inside(&root, &path)?;
+    if file.is_dir() {
+        return Err(format!("{path} 是文件夹"));
+    }
+    let existed = file.exists();
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("建不了文件夹：{e}"))?;
+    }
+    std::fs::write(&file, data).map_err(|e| format!("写不了 {path}：{e}"))?;
+    Ok(existed)
+}
+
 /// Removes a file; used to undo creating it.
 #[tauri::command]
 pub async fn ws_delete(root: String, path: String) -> Result<(), String> {

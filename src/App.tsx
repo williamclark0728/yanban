@@ -5,6 +5,7 @@ import { DetailPanel } from "./components/DetailPanel";
 import { Editors } from "./components/Editors";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
+import { UpdateCard } from "./components/UpdateCard";
 import { useData, usePrefs, useUi } from "./store";
 
 function useMedia(query: string) {
@@ -42,6 +43,7 @@ export default function App() {
 
   return (
     <div className="flex h-full overflow-hidden">
+      <UpdateCard />
       <div className={clsx("h-full w-full md:block md:w-auto", active ? "hidden" : "block")}>
         <Sidebar />
       </div>

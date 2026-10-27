@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { BookOpen, CheckCircle2, ChevronLeft, Download, ExternalLink, Eye, EyeOff, Globe, Loader2, Plug, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
+import { BookOpen, ChartColumn, CheckCircle2, ChevronLeft, Download, ExternalLink, Eye, EyeOff, Globe, Loader2, Plug, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { protocols } from "../lib/catalog";
 import { DESKTOP_DOWNLOAD, DESKTOP_RELEASES, isDesktop } from "../lib/desktop";
@@ -10,6 +10,8 @@ import { searchProviders, searchReady, webSearch } from "../lib/search";
 import { seedAgents, seedGroups } from "../lib/seed";
 import { MeAvatar } from "./Avatar";
 import { ConfigRow, McpSettings, SkillSettings } from "./Extensions";
+import { VersionRow } from "./UpdateCard";
+import { UsagePanel } from "./UsagePanel";
 import { ModelPicker } from "./ModelPicker";
 import { IconButton, Segmented } from "./ui";
 
@@ -33,6 +35,7 @@ export function SettingsDialog() {
     { value: "search", label: "联网搜索", icon: <Globe size={17} /> },
     { value: "skills", label: "技能", icon: <BookOpen size={17} /> },
     { value: "mcp", label: "MCP", icon: <Plug size={17} /> },
+    { value: "usage", label: "用量", icon: <ChartColumn size={17} /> },
   ];
 
   return (
@@ -84,6 +87,7 @@ export function SettingsDialog() {
             {settingsTab === "search" && <SearchSettings />}
             {settingsTab === "skills" && <SkillSettings />}
             {settingsTab === "mcp" && <McpSettings />}
+            {settingsTab === "usage" && <UsagePanel />}
           </div>
         </section>
       </div>
@@ -172,6 +176,11 @@ function General() {
               <Download size={15} /> 下载
             </a>
           </div>
+        </Row>
+      )}
+      {isDesktop && (
+        <Row title="版本" desc="新版本发布后，左下角会提示更新，点一下就能装好">
+          <VersionRow />
         </Row>
       )}
       {isDesktop && (

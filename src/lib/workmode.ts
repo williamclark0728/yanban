@@ -43,7 +43,7 @@ export function danger(command: string) {
 }
 
 /** Asks the user unless the approval level lets this kind of action through. */
-async function approve(report: Report, step: ToolTrace, kind: "read" | "change", ask: NonNullable<ToolTrace["ask"]>, signal?: AbortSignal) {
+export async function approve(report: Report, step: ToolTrace, kind: "read" | "change", ask: NonNullable<ToolTrace["ask"]>, signal?: AbortSignal) {
   const level = usePrefs.getState().approval;
   const needed = !!ask.danger || level === "ask" || (kind === "change" && level !== "full");
   if (!needed) return true;
