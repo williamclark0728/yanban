@@ -37,6 +37,29 @@ createServer(async (req, res) => {
       results: [1, 2].map((i) => ({ title: `${q} · 站内搜索 ${i}`, url: `https://example.net/${i}`, content: `「${q}」的第 ${i} 条结果。`, published_date: "2026-10-23" })),
     }));
   }
+  // Streamable HTTP MCP server at http://127.0.0.1:5199/mcp with one tool, lookup_paper.
+  // tools/list answers as JSON, tools/call as an event stream, so both response kinds get exercised.
+  if (req.url === "/mcp" && req.method === "POST") {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const msg = JSON.parse(raw);
+    const head = { ...cors, "access-control-expose-headers": "mcp-session-id", "mcp-session-id": "mock-session" };
+    if (msg.id === undefined) return res.writeHead(202, head).end();
+    if (msg.method !== "initialize" && req.headers["mcp-session-id"] !== "mock-session") return res.writeHead(404, head).end();
+    const result =
+      msg.method === "initialize"
+        ? { protocolVersion: msg.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "mock-mcp", version: "1" } }
+        : msg.method === "tools/list"
+          ? { tools: [{ name: "lookup_paper", description: "按标题查论文信息", inputSchema: { $schema: "http://json-schema.org/draft-07/schema#", type: "object", properties: { title: { type: "string" } }, required: ["title"] } }] }
+          : { content: [{ type: "text", text: `《${msg.params.arguments.title}》：2025 年发表，引用 42 次。` }] };
+    if (msg.method === "tools/call") {
+      res.writeHead(200, { ...head, "content-type": "text/event-stream" });
+      res.write(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", method: "notifications/progress", params: {} })}\n\n`);
+      return res.end(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: msg.id, result })}\n\n`);
+    }
+    res.writeHead(200, { ...head, "content-type": "application/json" });
+    return res.end(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result }));
+  }
   if (req.url !== "/v1/chat/completions" || req.method !== "POST") return res.writeHead(404, cors).end();
 
   let body = "";
@@ -110,11 +133,20 @@ createServer(async (req, res) => {
       ? `根据搜索结果，${last.slice(0, 20)} 有三条相关信息 [1][2]，其中第三条较新 [3]。`
       : result.startsWith("已生成") || result.startsWith("没有生成")
         ? `${result} 文件附在下面。`
-        : `群里已经完成：${result.slice(0, 80)}`;
+        : lastMsg.name === "use_skill" || /^[#\n]/.test(result) || result.includes("本地脚本")
+          ? `已按技能说明处理（说明 ${result.length} 字）。`
+          : result.startsWith("《")
+            ? `查到了：${result}`
+            : `群里已经完成：${result.slice(0, 80)}`;
   } else if (!system.includes("只输出一个 JSON 对象")) {
     // "生成 Word / Excel / PPT" asks for make_file with sample content.
     const kind = /生成/.test(last) && (/PPT|幻灯片/i.test(last) ? "pptx" : /Excel|表格/i.test(last) ? "xlsx" : /Word|文档/i.test(last) ? "docx" : null);
-    if (kind && tools.includes("make_file")) {
+    if (/技能/.test(last) && tools.includes("use_skill")) {
+      const name = payload.tools.find((t) => t.function.name === "use_skill").function.parameters.properties.name.enum[0];
+      call = { name: "use_skill", arguments: { name } };
+    } else if (/查论文/.test(last) && tools.includes("lookup_paper")) {
+      call = { name: "lookup_paper", arguments: { title: "研伴" } };
+    } else if (kind && tools.includes("make_file")) {
       call = {
         name: "make_file",
         arguments:

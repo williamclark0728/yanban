@@ -2,11 +2,11 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { presets, fromPreset } from "./lib/catalog";
 import { addExamples, db, ensureSeeded, getKv, setKv } from "./lib/db";
-import type { Agent, ChatRef, Group, Message, ModelRef, Provider, Run, SearchConfig, TeamTemplate } from "./types";
+import type { Agent, ChatRef, Group, McpServer, Message, ModelRef, Provider, Run, SearchConfig, Skill, TeamTemplate } from "./types";
 
 export type Theme = "dark" | "light" | "system";
 export type PanelTab = "info" | "members" | "runs" | "memory";
-export type SettingsTab = "general" | "providers" | "search";
+export type SettingsTab = "general" | "providers" | "search" | "skills" | "mcp";
 
 interface Prefs {
   mode: "simple" | "dev";
@@ -95,6 +95,10 @@ interface Data {
   templates: TeamTemplate[];
   saveTemplate: (t: TeamTemplate) => void;
   deleteTemplate: (id: string) => void;
+  skills: Skill[];
+  setSkills: (skills: Skill[]) => void;
+  mcpServers: McpServer[];
+  setMcpServers: (servers: McpServer[]) => void;
   /** The site's own web search, when the server offers it. */
   siteSearch: { limit: number; remaining: number } | null;
   refreshSiteSearch: () => Promise<void>;
@@ -161,10 +165,12 @@ export const useData = create<Data>()((set, get) => ({
   search: { provider: "bocha", keys: {} },
   siteSearch: null,
   templates: [],
+  skills: [],
+  mcpServers: [],
 
   load: async () => {
     await ensureSeeded();
-    const [agents, groups, messages, runs, providers, defaultModel, search, templates] = await Promise.all([
+    const [agents, groups, messages, runs, providers, defaultModel, search, templates, skills, mcpServers] = await Promise.all([
       db.agents.toArray(),
       db.groups.toArray(),
       db.messages.orderBy("at").toArray(),
@@ -173,11 +179,13 @@ export const useData = create<Data>()((set, get) => ({
       getKv<ModelRef | null>("defaultModel", null),
       getKv<SearchConfig>("search", { provider: "bocha", keys: {} }),
       getKv<TeamTemplate[]>("templates", []),
+      getKv<Skill[]>("skills", []),
+      getKv<McpServer[]>("mcpServers", []),
     ]);
     // A reply that was streaming when the page closed ends as stopped.
     const fixed = messages.map((m) => (m.kind === "text" && m.status === "streaming" ? { ...m, status: "stopped" as const } : m));
     const trial = get().trial;
-    set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(trial ? [...providers, trialProvider(trial)] : providers), defaultModel, search, templates });
+    set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(trial ? [...providers, trialProvider(trial)] : providers), defaultModel, search, templates, skills, mcpServers });
     void get().refreshTrial();
     void get().refreshSiteSearch();
   },
@@ -219,6 +227,16 @@ export const useData = create<Data>()((set, get) => ({
     const templates = get().templates.filter((t) => t.id !== id);
     set({ templates });
     void setKv("templates", templates);
+  },
+
+  setSkills: (skills) => {
+    set({ skills });
+    void setKv("skills", skills);
+  },
+
+  setMcpServers: (mcpServers) => {
+    set({ mcpServers });
+    void setKv("mcpServers", mcpServers);
   },
 
   saveSearch: (search) => {

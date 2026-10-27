@@ -5,7 +5,9 @@ import type { Agent, Attachment, Group, Issue, Message, TextMessage } from "../t
 import { attachmentText, hasImages } from "./files";
 import { dispatchRules, dispatchTools } from "./collab";
 import { describeError, streamReply } from "./llm";
+import { mcpTools } from "./mcp";
 import { FILE_RULES, fileTools, filesText } from "./outputs";
+import { skillRules, skillTools } from "./skills";
 import { NATIVE_WEB_RULES, tracer, WEB_RULES, webAccess, webPlan, type Report } from "./tools";
 
 /** Chats with work in flight. One run per chat; stopping a chat aborts all of its replies. */
@@ -201,7 +203,7 @@ export async function speak(opts: {
 
   const { report, halt } = tracer(id);
   const web = webAccess(opts.agent, report);
-  const tools = { ...web.tools, ...fileTools(id, report), ...opts.extraTools?.(report) };
+  const tools = { ...web.tools, ...fileTools(id, report), ...skillTools(report), ...(await mcpTools(report)), ...opts.extraTools?.(report) };
 
   let text = "";
   let reasoning = "";
@@ -223,7 +225,7 @@ export async function speak(opts: {
     const r = await streamReply({
       provider: target.provider,
       modelId: target.modelId,
-      system: `${opts.system}\n\n${FILE_RULES}`,
+      system: [opts.system, FILE_RULES, skillRules()].filter(Boolean).join("\n\n"),
       messages: opts.messages,
       params: opts.agent.params,
       signal: opts.signal,

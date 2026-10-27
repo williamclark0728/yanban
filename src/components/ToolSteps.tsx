@@ -1,20 +1,26 @@
 import clsx from "clsx";
-import { AlertCircle, ChevronDown, FilePlus2, FileText, Globe, Loader2, Search, Users } from "lucide-react";
+import { AlertCircle, BookOpen, ChevronDown, FilePlus2, FileText, Globe, Loader2, Plug, Search, Users } from "lucide-react";
 import { useUi } from "../store";
 import type { ToolTrace } from "../types";
 
-const icons = { web_search: Search, read_page: FileText, dispatch_to_group: Users, make_file: FilePlus2 };
+const icons = { web_search: Search, read_page: FileText, dispatch_to_group: Users, make_file: FilePlus2, use_skill: BookOpen, mcp: Plug };
 
-const verb = (t: ToolTrace) =>
-  t.name === "web_search"
-    ? `搜索「${t.label}」`
-    : t.name === "read_page"
-      ? `阅读 ${shortUrl(t.label)}`
-      : t.name === "make_file"
-        ? `生成 ${t.label}`
-        : t.status === "running"
-          ? `已派到「${t.label}」`
-          : `「${t.label}」`;
+function verb(t: ToolTrace) {
+  switch (t.name) {
+    case "web_search":
+      return `搜索「${t.label}」`;
+    case "read_page":
+      return `阅读 ${shortUrl(t.label)}`;
+    case "make_file":
+      return `生成 ${t.label}`;
+    case "use_skill":
+      return `使用技能「${t.label}」`;
+    case "mcp":
+      return `调用 ${t.label}`;
+    case "dispatch_to_group":
+      return t.status === "running" ? `已派到「${t.label}」` : `「${t.label}」`;
+  }
+}
 
 function shortUrl(url: string) {
   try {

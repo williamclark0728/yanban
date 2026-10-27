@@ -6,7 +6,7 @@
 
 - `npm run dev` → http://localhost:5180（端口固定，`/api/relay` 由 `vite.config.ts` 里的插件提供）
 - 每次改动后依次运行：`npx tsc -b`、`npm run build`、`npm run check:copy`
-- 不用真实 Key 的端到端测试：`node scripts/mock-llm.mjs`，在设置里添加自定义服务，Base URL 填 `http://127.0.0.1:5199/v1`。它能扮演主持人（返回分工 JSON）和审查人（第 1 轮报问题，第 2 轮通过）；群聊里说「自我介绍」走各自发言、说「先搜集」走两人流水线；消息含「搜索」时调用 web_search，含「交给群」时调用 dispatch_to_group，含「生成 Word / Excel / PPT」时调用 make_file；模型 `mock-plain` 模拟不支持工具。搜索服务选 SearXNG、地址填 `http://127.0.0.1:5199` 即可用模拟搜索
+- 不用真实 Key 的端到端测试：`node scripts/mock-llm.mjs`，在设置里添加自定义服务，Base URL 填 `http://127.0.0.1:5199/v1`。它能扮演主持人（返回分工 JSON）和审查人（第 1 轮报问题，第 2 轮通过）；群聊里说「自我介绍」走各自发言、说「先搜集」走两人流水线；消息含「搜索」时调用 web_search，含「交给群」时调用 dispatch_to_group，含「生成 Word / Excel / PPT」时调用 make_file，含「技能」时调用 use_skill，含「查论文」时调用模拟 MCP 服务（`http://127.0.0.1:5199/mcp`）的 lookup_paper；模型 `mock-plain` 模拟不支持工具。搜索服务选 SearXNG、地址填 `http://127.0.0.1:5199` 即可用模拟搜索
 - 线上环境预演：`npm run build && npx wrangler pages dev dist --port 8788`
 
 ## 代码地图
@@ -17,6 +17,9 @@
 - `src/lib/tools.ts`、`src/lib/search.ts`：`web_search` 和 `read_page` 工具，搜索服务配置在 设置 → 联网搜索。智能体开了联网、而模型自带搜索时（`nativeSearch`，在 llm.ts：通义千问加 `enable_search`，智谱加 `web_search` 工具，Kimi 用 `builtin_function` 的 `$web_search` 原样回传参数，Gemini 3 及以后加 Google Search 并显示来源），直接用模型自带的搜索，不再传这两个工具（`webPlan` / `webAccess`）；DeepSeek 等没有自带搜索的仍用这两个工具；每次工具调用写进消息的 `tools` 字段，界面显示为步骤和来源。工具都在浏览器里执行，网络请求走 `/api/relay`
 - `src/lib/templates.ts`、`src/components/Templates.tsx`：团队模板。内置模板的成员取自 `seed.ts`（管家、主笔、核查员、审稿人）加上调研员、策划；按模板建群时同名智能体直接复用；用户的模板存在 kv `templates`。每个模板只放一位产出成员，其余做审查（需要先后顺序时由主持人用 `after` 安排）
 - `src/lib/outputs.ts`、`src/lib/filegen.ts`、`src/components/MadeFiles.tsx`：文件产出。每次发言（`speak`）都带 `make_file` 工具，模型只写内容（Markdown 正文 / 工作表 / 每页标题、要点、讲稿），存在消息的 `files` 字段；预览直接渲染这些内容，下载时才按需加载 `filegen.ts`（docx、SheetJS、pptxgenjs）生成真文件，PPT 套用内置版式。生成的文件内容会写进群聊记录，审查成员能看到。任何回复都可以「下载为 Word」
+- `src/lib/skills.ts`：技能（通用 SKILL.md 格式，可导入整个技能文件夹，比如 `~/.codex/skills`）。系统提示只列名字和用途，模型用 `use_skill` 读取完整说明
+- `src/lib/mcp.ts`：远程 MCP 客户端（Streamable HTTP，自己实现的 initialize / tools/list / tools/call，响应可以是 JSON 或事件流），请求和模型调用一样走 `/api/relay`；启用的服务的工具提供给每次发言。本地 stdio MCP 留给桌面版
+- `src/lib/config.ts`、`src/components/Extensions.tsx`：配置导入导出（不含聊天记录；默认不含 Key，导入时文件里为空的 Key 不覆盖本机已存的），以及 设置 → 技能 / MCP 页面
 - `src/lib/files.ts`：附件读取；`src/lib/export.ts`：记录导出
 - `src/store.ts`：Zustand store，所有写操作都同步写入 IndexedDB；`resolveModel` 决定每个智能体实际用哪个模型
 - `relay/handler.ts`：开发环境和 Cloudflare 共用的转发逻辑

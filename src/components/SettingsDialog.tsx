@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { CheckCircle2, ChevronLeft, ExternalLink, Eye, EyeOff, Globe, Loader2, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
+import { BookOpen, CheckCircle2, ChevronLeft, ExternalLink, Eye, EyeOff, Globe, Loader2, Plug, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { protocols } from "../lib/catalog";
 import { describeError, listModels, testProvider } from "../lib/llm";
@@ -8,6 +8,7 @@ import type { Provider, SearchConfig } from "../types";
 import { searchProviders, searchReady, webSearch } from "../lib/search";
 import { seedAgents, seedGroups } from "../lib/seed";
 import { MeAvatar } from "./Avatar";
+import { ConfigRow, McpSettings, SkillSettings } from "./Extensions";
 import { ModelPicker } from "./ModelPicker";
 import { IconButton, Segmented } from "./ui";
 
@@ -29,6 +30,8 @@ export function SettingsDialog() {
     { value: "general", label: "通用", icon: <SlidersHorizontal size={17} /> },
     { value: "providers", label: "模型服务", icon: <Server size={17} /> },
     { value: "search", label: "联网搜索", icon: <Globe size={17} /> },
+    { value: "skills", label: "技能", icon: <BookOpen size={17} /> },
+    { value: "mcp", label: "MCP", icon: <Plug size={17} /> },
   ];
 
   return (
@@ -78,6 +81,8 @@ export function SettingsDialog() {
             {settingsTab === "general" && <General />}
             {settingsTab === "providers" && <Providers />}
             {settingsTab === "search" && <SearchSettings />}
+            {settingsTab === "skills" && <SkillSettings />}
+            {settingsTab === "mcp" && <McpSettings />}
           </div>
         </section>
       </div>
@@ -85,7 +90,7 @@ export function SettingsDialog() {
   );
 }
 
-function Row({ title, desc, children }: { title: string; desc?: string; children: ReactNode }) {
+export function Row({ title, desc, children }: { title: string; desc?: string; children: ReactNode }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-4">
       <div className="min-w-0">
@@ -153,6 +158,7 @@ function General() {
           {missing ? `添加回来（${missing} 个）` : "都在列表里"}
         </button>
       </Row>
+      <ConfigRow />
     </div>
   );
 }
@@ -257,7 +263,7 @@ function ProviderMark({ name }: { name: string }) {
   );
 }
 
-function Field({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode }) {
+export function Field({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode }) {
   return (
     <div>
       <div className="mb-1.5 text-sm font-medium">{label}</div>
@@ -267,12 +273,12 @@ function Field({ label, hint, children }: { label: ReactNode; hint?: ReactNode; 
   );
 }
 
-const inputCls =
+export const inputCls =
   "h-11 w-full rounded-xl border border-line bg-bg px-3.5 text-[15px] outline-none placeholder:text-fg-3 focus:border-accent";
 
-type Status = { kind: "busy"; text: string } | { kind: "ok"; text: string } | { kind: "error"; text: string; detail?: string } | null;
+export type Status = { kind: "busy"; text: string } | { kind: "ok"; text: string } | { kind: "error"; text: string; detail?: string } | null;
 
-function StatusBox({ status }: { status: Status }) {
+export function StatusBox({ status }: { status: Status }) {
   const dev = usePrefs((s) => s.mode === "dev");
   if (!status) return null;
   return (
@@ -295,7 +301,7 @@ function StatusBox({ status }: { status: Status }) {
   );
 }
 
-function SecretInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+export function SecretInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   const [show, setShow] = useState(false);
   return (
     <div className="relative">

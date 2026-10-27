@@ -159,7 +159,7 @@ export interface Source {
 
 export interface ToolTrace {
   id: string;
-  name: "web_search" | "read_page" | "dispatch_to_group" | "make_file";
+  name: "web_search" | "read_page" | "dispatch_to_group" | "make_file" | "use_skill" | "mcp";
   /** One line for the UI, e.g. the search query or the group name. */
   label: string;
   status: "running" | "done" | "error";
@@ -169,6 +169,25 @@ export interface ToolTrace {
   first?: number;
   /** The group a dispatch went to. */
   groupId?: string;
+}
+
+/** A skill in the common SKILL.md format: when to use it (description) and the instructions (body). */
+export interface Skill {
+  id: string;
+  name: string;
+  description: string;
+  body: string;
+  enabled: boolean;
+}
+
+/** A remote MCP server reached over Streamable HTTP; its tools are offered to every agent. */
+export interface McpServer {
+  id: string;
+  name: string;
+  url: string;
+  /** Extra request headers, e.g. Authorization. Kept in this browser like provider keys. */
+  headers: Record<string, string>;
+  enabled: boolean;
 }
 
 export type SearchProvider = "bocha" | "tavily" | "searxng";
