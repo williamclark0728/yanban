@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { AlertCircle, Archive, Brain, Check, CheckCircle2, ChevronDown, Copy, FileDown, Loader2, RotateCcw, RotateCw, Square } from "lucide-react";
+import { AlertCircle, Archive, Brain, Check, CheckCircle2, ChevronDown, Copy, FileDown, Loader2, MessageSquarePlus, RotateCcw, RotateCw, Square } from "lucide-react";
 import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -224,6 +224,16 @@ function Failure({ msg }: { msg: Extract<Message, { kind: "text" }> }) {
 
 /** Where the chat was compressed: later replies see this summary instead of the messages above it. */
 function Summary({ msg, agents }: { msg: Extract<Message, { kind: "text" }>; agents: Agent[] }) {
+  if (msg.reset) {
+    return (
+      <div className="my-5 flex items-center gap-3 px-2 text-xs text-fg-3">
+        <span className="h-px flex-1 bg-line" />
+        <MessageSquarePlus size={13} />
+        新话题：之后的回复不带上面的对话
+        <span className="h-px flex-1 bg-line" />
+      </div>
+    );
+  }
   const working = msg.status === "streaming";
   const failed = msg.status === "error" || msg.status === "stopped";
   return (
@@ -335,7 +345,7 @@ export function MessageItem({
           </span>
         )}
         {hasBody && (
-          <div className="rounded-[20px] bg-bubble px-4 py-2.5">
+          <div className="rounded-[20px] bg-bubble px-4 py-2.5" data-reply={msg.text && !streaming ? msg.id : undefined}>
             {reasoning && <Reasoning text={reasoning} live={streaming && !msg.text} />}
             {tools && <ToolSteps steps={tools} messageId={msg.id} />}
             {msg.text ? <RichText text={msg.text} agents={agents} cites={citations(tools)} /> : streaming && !reasoning && <Typing />}

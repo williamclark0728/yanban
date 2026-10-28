@@ -140,6 +140,47 @@ pub async fn ws_search(root: String, pattern: String, path: Option<String>, glob
     .map_err(|e| e.to_string())?
 }
 
+/// Files whose path contains `query` (any case), for `@` in the composer. Names that match come first, then shorter paths.
+#[tauri::command]
+pub async fn ws_files(root: String, query: String) -> Result<Vec<String>, String> {
+    let base = dunce::canonicalize(&root).map_err(|e| format!("工作区文件夹打不开：{e}"))?;
+    let q = query.trim().to_lowercase().replace('\\', "/");
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut found: Vec<(bool, String)> = Vec::new();
+        for entry in ignore::WalkBuilder::new(&base).build().filter_map(|e| e.ok()).take(20_000) {
+            if !entry.file_type().is_some_and(|t| t.is_file()) {
+                continue;
+            }
+            let rel = relative(&base, entry.path());
+            let lower = rel.to_lowercase();
+            if !lower.contains(&q) {
+                continue;
+            }
+            let in_name = lower.rsplit('/').next().is_some_and(|n| n.contains(&q));
+            found.push((in_name, rel));
+        }
+        found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.len().cmp(&b.1.len())).then_with(|| a.1.cmp(&b.1)));
+        Ok(found.into_iter().take(30).map(|(_, rel)| rel).collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A whole file as bytes, so the frontend can read it like an uploaded file (PDF, Word, Excel…).
+#[tauri::command]
+pub async fn ws_read_bytes(root: String, path: String) -> Result<tauri::ipc::Response, String> {
+    let file = inside(&root, &path)?;
+    let meta = std::fs::metadata(&file).map_err(|e| format!("找不到 {path}：{e}"))?;
+    if meta.is_dir() {
+        return Err(format!("{path} 是文件夹"));
+    }
+    if meta.len() > 60 * 1024 * 1024 {
+        return Err(format!("{path} 太大（{} MB），只能附上 60 MB 以内的文件", meta.len() / 1024 / 1024));
+    }
+    let bytes = std::fs::read(&file).map_err(|e| format!("读不了 {path}：{e}"))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Writes a file (creating folders as needed) and returns what was there before, for undo.
 #[tauri::command]
 pub async fn ws_write(root: String, path: String, content: String) -> Result<Option<String>, String> {

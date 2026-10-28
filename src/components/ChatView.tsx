@@ -1,12 +1,14 @@
-import { ChevronLeft, FileUp, PanelRight, PlugZap } from "lucide-react";
+import { ChevronLeft, Clock, FileUp, Lightbulb, PanelRight, PlugZap, Quote, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { sendToAgent, stop, useBusy } from "../lib/chat";
-import { sendToGroup } from "../lib/collab";
+import { compact, newTopic, stop, useBusy } from "../lib/chat";
+import { isDesktop } from "../lib/desktop";
+import { exportChat } from "../lib/export";
+import { send as sendOrQueue, unqueue, useQueue } from "../lib/queue";
 import { dayLabel, sameDay } from "../lib/time";
 import { resolveModel, useData, usePrefs, useUi } from "../store";
 import type { Attachment, Message } from "../types";
 import { BotAvatar, GroupAvatar } from "./Avatar";
-import { Composer, type ComposerHandle } from "./Composer";
+import { Composer, type Command, type ComposerHandle } from "./Composer";
 import { ContextMeter, EffortChip } from "./ContextMeter";
 import { MessageItem } from "./MessageItem";
 import { ModelChip } from "./ModelChip";
@@ -14,15 +16,86 @@ import { IconButton } from "./ui";
 
 const senderOf = (m?: Message) => (m && (m.kind === "text" || m.kind === "review") ? m.sender : undefined);
 
+interface Picked {
+  text: string;
+  messageId: string;
+  x: number;
+  top: number;
+  bottom: number;
+}
+
+/** The selected text when it lies inside one reply, with where to show the toolbar. */
+function readSelection(within: HTMLElement | null): Picked | null {
+  const s = window.getSelection();
+  const text = s?.toString().trim() ?? "";
+  if (!s || s.isCollapsed || !text || !s.rangeCount || !within) return null;
+  const range = s.getRangeAt(0);
+  const node = range.commonAncestorContainer;
+  const reply = (node instanceof Element ? node : node.parentElement)?.closest<HTMLElement>("[data-reply]");
+  if (!reply || !within.contains(reply)) return null;
+  const r = range.getBoundingClientRect();
+  return { text: text.slice(0, 3000), messageId: reply.dataset.reply!, x: r.left + r.width / 2, top: r.top, bottom: r.bottom };
+}
+
+/** Floats over a selection in a reply: quote it into the box, or ask about it in a side chat. */
+function SelectionBar({ picked, onQuote, onExplain }: { picked: Picked; onQuote: () => void; onExplain: () => void }) {
+  const above = picked.top > 120;
+  const x = Math.min(Math.max(picked.x, 90), window.innerWidth - 90);
+  return (
+    <div
+      className="fixed z-30 flex -translate-x-1/2 items-center gap-0.5 rounded-full bg-fg p-1 text-bg shadow-[var(--shadow)]"
+      style={{ left: x, top: above ? picked.top - 46 : picked.bottom + 8 }}
+      onMouseDown={(e) => e.preventDefault()}
+    >
+      <button type="button" onClick={onQuote} className="flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium hover:bg-bg/15">
+        <Quote size={14} /> 引用
+      </button>
+      <button type="button" onClick={onExplain} className="flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium hover:bg-bg/15">
+        <Lightbulb size={14} /> 讲解
+      </button>
+    </div>
+  );
+}
+
 export function ChatView() {
-  const { agents, groups, messages, providers, defaultModel, markRead } = useData();
-  const { active, back, togglePanel, panelOpen, openSettings } = useUi();
+  const { agents, groups, messages, providers, defaultModel, markRead, updateAgent, skills } = useData();
+  const { active, back, togglePanel, panelOpen, openSettings, openAside, setChip, setHelp } = useUi();
   const dev = usePrefs((s) => s.mode === "dev");
+  const canQueue = usePrefs((s) => s.queue);
   const busy = useBusy((s) => (active ? !!s[active.id] : false));
+  const queued = useQueue((s) => (active ? s[active.id] : undefined));
   const scroller = useRef<HTMLDivElement>(null);
   const composer = useRef<ComposerHandle>(null);
   const [dragging, setDragging] = useState(false);
+  const [picked, setPicked] = useState<Picked | null>(null);
   const stick = useRef(true);
+
+  // Selecting text in a reply shows the quote / explain toolbar.
+  useEffect(() => {
+    let timer = 0;
+    const update = () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(() => setPicked(readSelection(scroller.current)), 120);
+    };
+    document.addEventListener("selectionchange", update);
+    return () => {
+      document.removeEventListener("selectionchange", update);
+      clearTimeout(timer);
+    };
+  }, []);
+
+  // "/" outside a text field starts a command, like in the CLI agents.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target as HTMLElement;
+      if (t.closest("input, textarea, select, [contenteditable]") || document.querySelector(".fixed.inset-0")) return;
+      e.preventDefault();
+      composer.current?.focus("/");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const group = active?.kind === "group" ? groups.find((g) => g.id === active.id) : undefined;
   const agent = active?.kind === "agent" ? agents.find((a) => a.id === active.id) : undefined;
@@ -36,7 +109,8 @@ export function ChatView() {
   useEffect(() => {
     if (chatId) markRead(chatId);
     stick.current = true;
-  }, [chatId, markRead]);
+    setChip(null);
+  }, [chatId, markRead, setChip]);
 
   // Follow new content while the user is at the bottom.
   useEffect(() => {
@@ -57,10 +131,25 @@ export function ChatView() {
 
   const name = group?.name ?? agent!.name;
 
-  const send = (text: string, files: Attachment[]) => {
-    const attachments = files.length ? files : undefined;
-    if (agent) void sendToAgent(agent.id, text, attachments);
-    else void sendToGroup(chatId, text, attachments);
+  const send = (text: string, files: Attachment[]) => sendOrQueue(chatId, text, files.length ? files : undefined);
+
+  const commands: Command[] = [
+    { name: "compact", label: "压缩上下文", hint: "把之前的对话写成摘要", run: () => void compact(chatId) },
+    { name: "clear", label: "开始新话题", hint: "之后的回复不带上面的对话，记录不删", run: () => newTopic(chatId) },
+    ...(agent
+      ? [
+          { name: "model", label: "换模型", run: () => setChip("model") },
+          { name: "effort", label: "思考强度", run: () => setChip("effort") },
+          { name: "web", label: agent.web ? "关闭联网" : "打开联网", hint: `现在${agent.web ? "开着" : "关着"}`, run: () => updateAgent(agent.id, { web: !agent.web }) },
+        ]
+      : []),
+    { name: "export", label: "导出对话", hint: "存成 Markdown 文件", run: () => exportChat(chatId) },
+    { name: "help", label: "快捷键和命令", run: () => setHelp(true) },
+  ];
+
+  const clearSelection = () => {
+    window.getSelection()?.removeAllRanges();
+    setPicked(null);
   };
 
   const hasFiles = (e: React.DragEvent) => [...e.dataTransfer.types].includes("Files");
@@ -117,6 +206,7 @@ export function ChatView() {
         onScroll={(e) => {
           const el = e.currentTarget;
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          if (picked) setPicked(readSelection(el));
         }}
       >
         <div className="mx-auto w-full max-w-[820px] px-4 pb-6 pt-20 md:px-6">
@@ -166,12 +256,29 @@ export function ChatView() {
             <span className="text-sm font-medium text-accent-text">去连接</span>
           </button>
         )}
+        {queued && queued.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5 px-1">
+            {queued.map((q) => (
+              <span key={q.id} className="flex max-w-full items-center gap-1.5 rounded-full border border-line bg-raise py-1 pl-2.5 pr-1.5 text-[12.5px] text-fg-2">
+                <Clock size={12} className="shrink-0" />
+                <span className="truncate">排队中：{q.text || `${q.attachments?.length ?? 0} 个附件`}</span>
+                <button type="button" aria-label="取消这条" onClick={() => unqueue(chatId, q.id)} className="shrink-0 text-fg-3 hover:text-fg">
+                  <X size={13} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <Composer
           ref={composer}
           key={chatId}
-          placeholder={group ? `发消息给 ${name}，@ 可指定成员` : `发消息给 ${name}`}
+          placeholder={group ? `发消息给 ${name}，@ 指定成员，/ 命令，$ 技能` : `发消息给 ${name}，/ 命令，$ 技能`}
           members={members}
           busy={busy}
+          canQueue={canQueue}
+          commands={commands}
+          skills={skills.filter((s) => s.enabled)}
+          workspace={isDesktop ? (agent?.workspace ?? group?.workspace) : undefined}
           tools={
             agent && (
               <>
@@ -185,6 +292,19 @@ export function ChatView() {
           onSend={send}
         />
       </div>
+      {picked && (
+        <SelectionBar
+          picked={picked}
+          onQuote={() => {
+            composer.current?.quote(picked.text);
+            clearSelection();
+          }}
+          onExplain={() => {
+            openAside({ chat: chatId, messageId: picked.messageId, quote: picked.text });
+            clearSelection();
+          }}
+        />
+      )}
     </main>
   );
 }

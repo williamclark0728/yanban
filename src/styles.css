@@ -107,6 +107,14 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Settings → 消息字号. Most UI text has fixed sizes; messages follow the body size. */
+:root[data-size="small"] body {
+  font-size: 14px;
+}
+:root[data-size="large"] body {
+  font-size: 17px;
+}
+
 button {
   cursor: pointer;
 }

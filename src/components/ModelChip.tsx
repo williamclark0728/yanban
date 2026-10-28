@@ -1,14 +1,15 @@
 import clsx from "clsx";
 import { ChevronDown } from "lucide-react";
-import { useState } from "react";
-import { resolveModel, TRIAL_ID, useData } from "../store";
+import { resolveModel, TRIAL_ID, useData, useUi } from "../store";
 import type { Agent } from "../types";
 import { ModelList } from "./ModelPicker";
 
 /** Composer button showing the agent's model; opens a list to switch it for this agent only. */
 export function ModelChip({ agent }: { agent: Agent }) {
   const { providers, defaultModel, updateAgent, trial } = useData();
-  const [open, setOpen] = useState(false);
+  // Open state lives in the store so the /model command can open it.
+  const open = useUi((s) => s.chip === "model");
+  const setOpen = (v: boolean) => useUi.getState().setChip(v ? "model" : null);
   const target = resolveModel(agent, providers, defaultModel);
   const fallback = resolveModel(undefined, providers, defaultModel);
   if (!target) return null;
@@ -18,7 +19,7 @@ export function ModelChip({ agent }: { agent: Agent }) {
     <div className="relative hidden shrink-0 self-center sm:block">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
         title={`${target.provider.name} · ${target.modelId}`}
         className={clsx(
           "flex h-8 max-w-[200px] items-center gap-1 rounded-full px-3 text-[13px] text-fg-2 transition-colors hover:bg-active hover:text-fg",

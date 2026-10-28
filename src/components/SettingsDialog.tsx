@@ -108,7 +108,8 @@ export function Row({ title, desc, children }: { title: string; desc?: string; c
 }
 
 function General() {
-  const { mode, setMode, theme, setTheme, name, setName, approval, setApproval } = usePrefs();
+  const { mode, setMode, theme, setTheme, name, setName, approval, setApproval, fontSize, steps, queue, set } = usePrefs();
+  const setHelp = useUi((s) => s.setHelp);
   const { agents, groups, restoreExamples } = useData();
   const [restoring, setRestoring] = useState(false);
   const missing =
@@ -148,6 +149,42 @@ function General() {
             { value: "system", label: "跟随系统" },
           ]}
         />
+      </Row>
+      <Row title="消息字号">
+        <Segmented
+          value={fontSize}
+          onChange={(fontSize) => set({ fontSize })}
+          options={[
+            { value: "small", label: "小" },
+            { value: "medium", label: "中" },
+            { value: "large", label: "大" },
+          ]}
+        />
+      </Row>
+      <Row title="工具步骤" desc={steps === "full" ? "回复里列出每一步（搜索、读文件、运行命令）" : "折叠成一行，点开再看；需要你审批的步骤照常显示"}>
+        <Segmented
+          value={steps}
+          onChange={(steps) => set({ steps })}
+          options={[
+            { value: "full", label: "详细" },
+            { value: "brief", label: "简略" },
+          ]}
+        />
+      </Row>
+      <Row title="回复时发消息" desc={queue ? "排队，等这条回复完成后自动发出" : "等回复完成后才能发"}>
+        <Segmented
+          value={queue ? "queue" : "wait"}
+          onChange={(v) => set({ queue: v === "queue" })}
+          options={[
+            { value: "queue", label: "排队" },
+            { value: "wait", label: "不能发" },
+          ]}
+        />
+      </Row>
+      <Row title="快捷键和命令" desc="输入 / 用命令，$ 选技能，@ 选成员或文件；选中回答里的文字可以引用或讲解">
+        <button type="button" onClick={() => setHelp(true)} className="h-10 rounded-full border border-line-2 px-5 text-sm font-medium hover:bg-hover">
+          查看
+        </button>
       </Row>
       <Row title="示例" desc={`论文写作组，以及${seedAgents.map((a) => a.name).join("、")}`}>
         <button

@@ -13,16 +13,25 @@ export type SettingsTab = "general" | "providers" | "search" | "skills" | "mcp" 
 /** Desktop work mode: which local actions need the user's OK. Dangerous commands always do. */
 export type Approval = "ask" | "read" | "full";
 
+export type FontSize = "small" | "medium" | "large";
+
 interface Prefs {
   mode: "simple" | "dev";
   theme: Theme;
   /** What the user wants to be called; empty until they set it. */
   name: string;
   approval: Approval;
+  /** Text size of the messages. */
+  fontSize: FontSize;
+  /** "brief" folds a reply's tool steps into one line until clicked; approvals always show. */
+  steps: "full" | "brief";
+  /** Messages sent while a reply is running wait and go out after it, instead of being blocked. */
+  queue: boolean;
   setMode: (mode: Prefs["mode"]) => void;
   setTheme: (theme: Theme) => void;
   setName: (name: string) => void;
   setApproval: (approval: Approval) => void;
+  set: (patch: Partial<Pick<Prefs, "fontSize" | "steps" | "queue">>) => void;
 }
 
 export const usePrefs = create<Prefs>()(
@@ -32,17 +41,34 @@ export const usePrefs = create<Prefs>()(
       theme: "dark",
       name: "",
       approval: "read",
+      fontSize: "medium",
+      steps: "full",
+      queue: true,
       setMode: (mode) => set({ mode }),
       setTheme: (theme) => set({ theme }),
       setName: (name) => set({ name: name.slice(0, 20) }),
       setApproval: (approval) => set({ approval }),
+      set: (patch) => set(patch),
     }),
     { name: "yanban.prefs" },
   ),
 );
 
+/** A passage the user selected in a reply, explained in a side chat. */
+export interface Aside {
+  chat: string;
+  messageId: string;
+  quote: string;
+  /** Changes on every open, so asking about the same passage again starts over. */
+  key: string;
+}
+
 interface Ui {
   active: ChatRef | null;
+  aside: Aside | null;
+  /** A composer popover opened from a slash command. */
+  chip: "model" | "effort" | null;
+  helpOpen: boolean;
   panelOpen: boolean;
   panelTab: PanelTab;
   settingsOpen: boolean;
@@ -63,10 +89,17 @@ interface Ui {
   setEditProvider: (id: string | null) => void;
   closeSettings: () => void;
   setSearch: (q: string) => void;
+  openAside: (aside: Omit<Aside, "key">) => void;
+  closeAside: () => void;
+  setChip: (chip: Ui["chip"]) => void;
+  setHelp: (open: boolean) => void;
 }
 
 export const useUi = create<Ui>()((set) => ({
   active: { kind: "agent", id: "helper" },
+  aside: null,
+  chip: null,
+  helpOpen: false,
   panelOpen: false,
   panelTab: "info",
   settingsOpen: false,
@@ -84,6 +117,10 @@ export const useUi = create<Ui>()((set) => ({
   setEditProvider: (editProvider) => set({ editProvider }),
   closeSettings: () => set({ settingsOpen: false }),
   setSearch: (search) => set({ search }),
+  openAside: (aside) => set({ aside: { ...aside, key: crypto.randomUUID() } }),
+  closeAside: () => set({ aside: null }),
+  setChip: (chip) => set({ chip }),
+  setHelp: (helpOpen) => set({ helpOpen }),
 }));
 
 interface Data {

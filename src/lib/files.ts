@@ -216,6 +216,7 @@ export function attachmentText(files: Attachment[] = []) {
   return files
     .filter((f) => f.text)
     .map((f) => {
+      if (f.skill) return `<技能 名称="${f.name}">用户指定用这个技能完成这次请求，按下面的说明做：\n${f.text}\n</技能>`;
       const note = f.truncated ? "（内容较长，只附上前一部分）" : "";
       return `<附件 文件名="${f.name}"${f.pages ? ` 页数="${f.pages}"` : ""}>${note}\n${f.text}\n</附件>`;
     })

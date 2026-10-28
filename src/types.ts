@@ -105,6 +105,8 @@ export interface Attachment {
   image?: string; // base64 without the data: prefix
   pages?: number;
   truncated?: boolean;
+  /** A skill the user picked with `$`: its instructions, sent along with the message. */
+  skill?: boolean;
 }
 
 interface Base {
@@ -130,6 +132,8 @@ export type TextMessage = Base & {
   files?: MadeFile[];
   /** A summary of the chat before it; replies see this instead of the older messages. */
   summary?: boolean;
+  /** With `summary`: a new topic (/clear). Replies see nothing before it, and the text is empty. */
+  reset?: boolean;
 };
 
 export type FileFormat = "md" | "docx" | "xlsx" | "pptx";

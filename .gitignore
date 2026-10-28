@@ -7,3 +7,6 @@ dist
 .DS_Store
 .wrangler
 tsconfig.tsbuildinfo
+# Program files from installing the desktop app into this folder
+/yanban.exe
+/uninstall.exe

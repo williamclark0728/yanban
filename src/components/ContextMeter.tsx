@@ -3,7 +3,7 @@ import { Brain, ChevronDown, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { compact, contextUse, useBusy } from "../lib/chat";
 import { AUTO_COMPACT, fmtTokens } from "../lib/context";
-import { useData } from "../store";
+import { useData, useUi } from "../store";
 import type { Agent, Effort } from "../types";
 
 /** A ring showing how full the context is; opens details and a compress button. */
@@ -84,14 +84,15 @@ export const EFFORTS: { value: Effort; label: string; hint: string }[] = [
 /** Composer button for the agent's thinking effort. Services that can't adjust it ignore the setting. */
 export function EffortChip({ agent }: { agent: Agent }) {
   const setParam = useData((s) => s.setParam);
-  const [open, setOpen] = useState(false);
+  const open = useUi((s) => s.chip === "effort");
+  const setOpen = (v: boolean) => useUi.getState().setChip(v ? "effort" : null);
   const value = agent.params.effort ?? "auto";
   const current = EFFORTS.find((e) => e.value === value)!;
   return (
     <div className="relative hidden shrink-0 self-center sm:block">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
         title="思考强度"
         className={clsx("flex h-8 items-center gap-1 rounded-full px-2.5 text-[13px] text-fg-2 transition-colors hover:bg-active hover:text-fg", open && "bg-active text-fg")}
       >

@@ -24,6 +24,7 @@
 - `src/lib/config.ts`、`src/components/Extensions.tsx`：配置导入导出（不含聊天记录；默认不含 Key，导入时文件里为空的 Key 不覆盖本机已存的），以及 设置 → 技能 / MCP 页面
 - 桌面版（Tauri 2，`src-tauri/`）：前端完全复用，`src/lib/desktop.ts` 判断是否在桌面里（`isDesktop`）并桥接 Rust。桌面里模型服务、搜索和远程 MCP 都用 HTTP 插件直连（不走 `/api/relay`），不提供本站的体验模型和本站搜索。工作模式：智能体资料里打开「工作模式」选一个文件夹（`Agent.workspace`），每次发言就带上 `src/lib/workmode.ts` 的六个工具（list_dir / read_file / search_files / write_file / edit_file / run_command），工作区的 `AGENTS.md` 写进系统提示当记忆。审批三档在 设置 → 通用（`usePrefs.approval`）；危险命令（`danger()` 的规则）任何档位都要点两次。改文件前在步骤里显示差异（`src/lib/diff.ts`），改完可撤销（旧内容存在步骤的 `undo` 里）。Rust 端（`src-tauri/src/workspace.rs`）所有路径都检查不能出工作区，命令用 PowerShell、有超时；`mcp.rs` 管本机 stdio MCP 进程，JSON-RPC 在前端（`mcp.ts` 的 `StdioSession`）
 - `src/lib/files.ts`：附件读取；`src/lib/export.ts`：记录导出
+- 输入框（`src/components/Composer.tsx`）：`/` 命令（列表由 `ChatView` 传入；`/clear` 是 `chat.ts` 的 `newTopic`，写一条 `summary + reset` 的空标记消息，之后的上下文从它开始），`$` 技能（作为 `Attachment.skill` 随消息发出），`@` 成员或工作区文件（Rust `ws_files` / `ws_read_bytes`，读出的字节按上传文件解析）。回复进行中发的消息进 `src/lib/queue.ts` 排队。选中回答文字（`[data-reply]`）弹出引用 / 讲解，讲解是 `ExplainPanel.tsx` 的临时对话，不存库、不进主对话上下文，「放回对话」才写进消息
 - `src/store.ts`：Zustand store，所有写操作都同步写入 IndexedDB；`resolveModel` 决定每个智能体实际用哪个模型
 - `relay/handler.ts`：开发环境和 Cloudflare 共用的转发逻辑
 - `relay/trial.ts`：体验模型（`/api/trial`）。服务器端持有额度，按访客每天限次；前端把它当成 id 为 `trial` 的服务，排在用户自己的服务之后，不存进数据库

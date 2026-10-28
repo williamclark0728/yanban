@@ -1,4 +1,4 @@
-import { FileArchive, FileCode2, FileImage, FileSpreadsheet, FileText, FileType2, Presentation, X } from "lucide-react";
+import { BookOpen, FileArchive, FileCode2, FileImage, FileSpreadsheet, FileText, FileType2, Presentation, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { formatSize } from "../lib/files";
 import type { Attachment } from "../types";
@@ -16,7 +16,7 @@ export function FileIcon({ kind }: { kind?: Attachment["kind"] }) {
 }
 
 const label = (f: Attachment) =>
-  [formatSize(f.size), f.pages && `${f.pages} 页`, f.truncated && "只读取前一部分"].filter(Boolean).join(" · ");
+  f.skill ? "技能 · 这次按它的说明做" : [formatSize(f.size), f.pages && `${f.pages} 页`, f.truncated && "只读取前一部分"].filter(Boolean).join(" · ");
 
 /** File tile inside a message; opens a preview of what the agents actually read. */
 export function FileCard({ file }: { file: Attachment }) {
@@ -43,7 +43,7 @@ export function FileCard({ file }: { file: Attachment }) {
         className="mb-1.5 flex max-w-[280px] items-center gap-2.5 rounded-2xl bg-bubble px-3 py-2 text-left enabled:hover:bg-raise-2"
       >
         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-text">
-          <FileIcon kind={file.kind} />
+          {file.skill ? <BookOpen size={16} /> : <FileIcon kind={file.kind} />}
         </span>
         <span className="min-w-0">
           <span className="block truncate text-sm font-medium">{file.name}</span>

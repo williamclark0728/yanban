@@ -163,7 +163,7 @@ export function transcript(chat: string, limit: number, sinceId?: string) {
     return `【${who}】${body}`;
   };
   const lines = [...all.slice(0, start).map(line).filter(Boolean).slice(-limit), ...all.slice(start).map(line).filter(Boolean)];
-  if (summary) lines.unshift(`【系统】更早的对话已压缩，摘要：\n${summary.text}`);
+  if (summary?.text) lines.unshift(`【系统】更早的对话已压缩，摘要：\n${summary.text}`);
   return `群聊记录（${lines.length} 条）：\n\n${lines.join("\n\n")}`;
 }
 
@@ -292,7 +292,7 @@ export async function reply(agentId: string) {
     const { messages, groups } = useData.getState();
     const context = privateHistory(messages, agentId, agent.params.history);
     const { summary } = sinceSummary(messages.filter((m) => m.chat === agentId));
-    const base = summary ? `${systemPrompt(agent)}\n\n更早的对话已压缩，摘要如下（原文已不在上下文里）：\n${summary.text}` : systemPrompt(agent);
+    const base = summary?.text ? `${systemPrompt(agent)}\n\n更早的对话已压缩，摘要如下（原文已不在上下文里）：\n${summary.text}` : systemPrompt(agent);
     // A lead can hand work to the groups it runs, taking along the files from the user's latest message.
     const led = groups.filter((g) => g.leadId === agent.id);
     const asked = messages.findLast((m): m is TextMessage => m.chat === agentId && m.kind === "text" && m.sender === "me");
@@ -354,7 +354,7 @@ export async function compact(chat: string) {
   let text = group
     ? transcript(chat, 100_000)
     : [
-        summary && `【之前的摘要】${summary.text}`,
+        summary?.text && `【之前的摘要】${summary.text}`,
         ...rest
           .filter((m): m is TextMessage => m.kind === "text" && !m.summary && m.status !== "streaming" && m.status !== "error")
           .map((m) => `【${m.sender === "me" ? "用户" : agent.name}】${[withFiles(m), filesText(m.files)].filter(Boolean).join("\n\n")}`),
@@ -390,6 +390,13 @@ export async function compact(chat: string) {
   } finally {
     end(chat);
   }
+}
+
+/** Starts a new topic: later replies see nothing above this point. Nothing is deleted. */
+export function newTopic(chat: string) {
+  const who = speaker(chat);
+  if (!who || useBusy.getState()[chat]) return;
+  useData.getState().addMessage({ id: uid(), chat, kind: "text", sender: who.agent.id, text: "", summary: true, reset: true, at: Date.now() });
 }
 
 /** Compresses before the next message when the context is nearly full, like the CLI agents do. */

@@ -15,6 +15,8 @@ pub fn run() {
             workspace::ws_read,
             workspace::ws_peek,
             workspace::ws_search,
+            workspace::ws_files,
+            workspace::ws_read_bytes,
             workspace::ws_write,
             workspace::ws_write_bytes,
             workspace::ws_delete,

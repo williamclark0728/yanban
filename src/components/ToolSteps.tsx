@@ -11,6 +11,7 @@ import {
   FolderOpen,
   Globe,
   Hand,
+  ListChecks,
   Loader2,
   Plug,
   Search,
@@ -21,7 +22,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { answer, undo, usePending } from "../lib/workmode";
-import { useUi } from "../store";
+import { usePrefs, useUi } from "../store";
 import type { DiffLine, ToolTrace } from "../types";
 
 const icons = {
@@ -92,6 +93,26 @@ export function citations(steps?: ToolTrace[]) {
 
 /** What an agent did with its tools before (or while) answering. */
 export function ToolSteps({ steps, messageId }: { steps: ToolTrace[]; messageId: string }) {
+  const brief = usePrefs((s) => s.steps === "brief");
+  // Brief: one line until clicked. Steps that wait for the user always show.
+  if (brief && steps.length > 1 && !steps.some((t) => t.status === "waiting")) {
+    const running = steps.findLast((t) => t.status === "running");
+    const failed = steps.filter((t) => t.status === "error").length;
+    return (
+      <details className="group/b mb-2">
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[13px] text-fg-2 select-none">
+          {running ? <Loader2 size={14} className="shrink-0 animate-spin" /> : <ListChecks size={14} className="shrink-0" />}
+          <span className="min-w-0 truncate">{running ? verb(running) : `执行了 ${steps.length} 步${failed ? `，${failed} 步出错` : ""}`}</span>
+          <ChevronDown size={14} className="shrink-0 transition-transform group-open/b:rotate-180" />
+        </summary>
+        <div className="mt-1.5 space-y-1.5 border-l border-line pl-2.5">
+          {steps.map((t) => (
+            <Step key={t.id} step={t} messageId={messageId} />
+          ))}
+        </div>
+      </details>
+    );
+  }
   return (
     <div className="mb-2 space-y-1.5">
       {steps.map((t) => (

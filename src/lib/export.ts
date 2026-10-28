@@ -1,6 +1,7 @@
 import { useData } from "../store";
 import type { Agent, Issue, Message, Run, StepType } from "../types";
 import { judge } from "./collab";
+import { isDesktop, saveAs } from "./desktop";
 
 const stepName: Record<StepType, string> = { plan: "分工", draft: "产出", check: "核查", review: "审查", revise: "修订", summary: "最终交付" };
 const issueName: Record<Issue["status"], string> = { holds: "成立", unsure: "存疑", rejected: "不成立" };
@@ -130,12 +131,41 @@ export function runToJson(run: Run) {
 }
 
 export function download(filename: string, content: string, mime: string) {
-  const url = URL.createObjectURL(new Blob([content], { type: `${mime};charset=utf-8` }));
+  const blob = new Blob([content], { type: `${mime};charset=utf-8` });
+  if (isDesktop) return void saveAs(filename, blob);
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** A whole chat as Markdown (/export): who said what, with summaries and new-topic marks. */
+export function chatToMarkdown(chat: string) {
+  const { agents, groups, messages } = useData.getState();
+  const title = groups.find((g) => g.id === chat)?.name ?? agents.find((a) => a.id === chat)?.name ?? "对话";
+  const name = (id: string) => (id === "me" ? "我" : (agents.find((a) => a.id === id)?.name ?? "已删除的成员"));
+  const parts = messages
+    .filter((m) => m.chat === chat)
+    .map((m) => {
+      if (m.kind === "round") return `> 第 ${m.round} 轮 · ${verdictName[m.verdict]}：${m.note}`;
+      if (m.kind === "text" && m.reset) return "---\n\n*新话题*";
+      if (m.kind === "text" && m.summary) return m.text ? `---\n\n*之前的对话已压缩，摘要：*\n\n${m.text}` : null;
+      if (!m.text && !(m.kind === "text" && m.attachments?.length)) return null;
+      const files = m.kind === "text" && m.attachments?.length ? `\n\n附件：${m.attachments.map((f) => f.name).join("、")}` : "";
+      const issues = m.kind === "review" ? `\n\n${issueTable(m.issues)}` : "";
+      return `### ${name(m.sender)} · ${stamp(m.at)}\n\n${textOf(m)}${files}${issues}`;
+    })
+    .filter(Boolean);
+  return { title, text: [`# ${title}`, `导出时间：${stamp(Date.now())}`, ...parts].join("\n\n") + "\n" };
+}
+
+export function exportChat(chat: string) {
+  const { title, text } = chatToMarkdown(chat);
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  download(`研伴对话_${title.replace(/[\\/:*?"<>|\s]+/g, "")}_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}.md`, text, "text/markdown");
 }
 
 export const exportName = (run: Run, ext: string) => {
