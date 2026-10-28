@@ -13,6 +13,7 @@ import {
   Hand,
   ListChecks,
   Loader2,
+  MessageCircleQuestion,
   Plug,
   Search,
   ShieldAlert,
@@ -21,6 +22,7 @@ import {
   Users,
 } from "lucide-react";
 import { useState } from "react";
+import { answerQuestion, useQuestions } from "../lib/agentTools";
 import { answer, undo, usePending } from "../lib/workmode";
 import { usePrefs, useUi } from "../store";
 import type { DiffLine, ToolTrace } from "../types";
@@ -39,6 +41,7 @@ const icons = {
   write_file: FilePen,
   edit_file: FilePen,
   run_command: SquareTerminal,
+  ask_user: MessageCircleQuestion,
 };
 
 const short = (s: string, n = 60) => (s.length > n ? `${s.slice(0, n)}…` : s);
@@ -70,7 +73,56 @@ function verb(t: ToolTrace) {
       return `调用 ${t.label}`;
     case "dispatch_to_group":
       return t.status === "running" ? `已派到「${t.label}」` : `「${t.label}」`;
+    case "ask_user":
+      return t.answer ? `问你：${short(t.label, 40)} → ${short(t.answer, 40)}` : `问你：${short(t.label, 60)}`;
   }
+}
+
+/** A question from the agent: click a suggested answer or write one. The reply continues with it. */
+function Question({ step: t }: { step: ToolTrace }) {
+  const live = useQuestions((s) => !!s[t.id]);
+  const [text, setText] = useState("");
+  const send = (a: string) => a.trim() && answerQuestion(t.id, a.trim());
+  return (
+    <div className="w-[min(520px,70vw)] max-w-full space-y-2 rounded-xl border border-accent/40 bg-accent-soft p-3">
+      <div className="flex items-start gap-2 text-[13.5px]">
+        <MessageCircleQuestion size={16} className="mt-px shrink-0 text-accent-text" />
+        <div className="min-w-0 font-medium">{t.question?.text ?? t.label}</div>
+      </div>
+      {live ? (
+        <>
+          {!!t.question?.options.length && (
+            <div className="flex flex-wrap gap-1.5">
+              {t.question.options.map((o) => (
+                <button key={o} type="button" onClick={() => send(o)} className="rounded-full border border-line-2 bg-raise px-3 py-1 text-[13px] hover:bg-hover">
+                  {o}
+                </button>
+              ))}
+            </div>
+          )}
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              send(text);
+            }}
+          >
+            <input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={t.question?.options.length ? "或者自己写" : "写下你的回答"}
+              className="h-8 min-w-0 flex-1 rounded-full border border-line bg-raise px-3 text-[13px] outline-none focus:border-line-2"
+            />
+            <button type="submit" disabled={!text.trim()} className="h-8 shrink-0 rounded-full bg-fg px-4 text-[13px] font-semibold text-bg disabled:opacity-40">
+              回答
+            </button>
+          </form>
+        </>
+      ) : (
+        <div className="text-right text-[12.5px] text-fg-3">已停止</div>
+      )}
+    </div>
+  );
 }
 
 function shortUrl(url: string) {
@@ -181,7 +233,7 @@ function Approval({ step: t }: { step: ToolTrace }) {
 function Step({ step: t, messageId }: { step: ToolTrace; messageId: string }) {
   const open = useUi((s) => s.open);
   const [undoError, setUndoError] = useState("");
-  if (t.status === "waiting") return <Approval step={t} />;
+  if (t.status === "waiting") return t.name === "ask_user" ? <Question step={t} /> : <Approval step={t} />;
   const Icon = t.status === "running" ? Loader2 : t.status === "error" ? AlertCircle : icons[t.name];
   const head = (
     <>

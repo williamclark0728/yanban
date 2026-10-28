@@ -1,13 +1,16 @@
 import clsx from "clsx";
-import { AlertCircle, Archive, Brain, Check, CheckCircle2, ChevronDown, Copy, FileDown, Loader2, MessageSquarePlus, RotateCcw, RotateCw, Square } from "lucide-react";
+import { AlertCircle, Archive, Brain, Check, CheckCircle2, ChevronDown, Circle, CircleDot, Copy, FileDown, FilePen, ListTodo, Loader2, MessageSquarePlus, Play, RotateCcw, RotateCw, Square, Undo2 } from "lucide-react";
 import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { retry } from "../lib/chat";
+import { RUN_PLAN, setPlanMode } from "../lib/agentTools";
+import { retry, useBusy } from "../lib/chat";
+import { send } from "../lib/queue";
+import { undoAll } from "../lib/workmode";
 import { download, replyAsDocx } from "../lib/outputs";
 import { clock } from "../lib/time";
-import { usePrefs, useUi } from "../store";
-import type { Agent, Issue, Message, Usage, Verdict } from "../types";
+import { useData, usePrefs, useUi } from "../store";
+import type { Agent, Issue, Message, Todo, ToolTrace, Usage, Verdict } from "../types";
 import { BotAvatar, palette } from "./Avatar";
 import { FileCard } from "./FileCard";
 import { MadeFiles } from "./MadeFiles";
@@ -222,6 +225,96 @@ function Failure({ msg }: { msg: Extract<Message, { kind: "text" }> }) {
   );
 }
 
+/** The agent's step list for this reply, ticked off as it works. */
+function Todos({ todos }: { todos: Todo[] }) {
+  const done = todos.filter((t) => t.status === "done").length;
+  return (
+    <div className="mb-2 rounded-xl bg-active px-3 py-2">
+      <div className="mb-1 flex items-center gap-1.5 text-[12.5px] font-medium text-fg-2">
+        <ListTodo size={14} /> 步骤 {done}/{todos.length}
+      </div>
+      <ul className="space-y-0.5 text-[13.5px]">
+        {todos.map((t, i) => (
+          <li key={i} className={clsx("flex items-start gap-2", t.status === "done" && "text-fg-3 line-through")}>
+            {t.status === "done" ? (
+              <CheckCircle2 size={14} className="mt-[3px] shrink-0 text-ok" />
+            ) : t.status === "in_progress" ? (
+              <CircleDot size={14} className="mt-[3px] shrink-0 text-accent-text" />
+            ) : (
+              <Circle size={14} className="mt-[3px] shrink-0 text-fg-3" />
+            )}
+            <span className={clsx(t.status === "in_progress" && "font-medium")}>{t.text}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Every file this reply changed, with one button to put them all back. */
+function Changes({ messageId, tools }: { messageId: string; tools: ToolTrace[] }) {
+  const changed = tools.filter((t) => t.undo);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  if (!changed.length) return null;
+  const files = [...new Set(changed.map((t) => t.undo!.path))];
+  const open = changed.filter((t) => !t.undo!.undone);
+  return (
+    <div className="mt-1.5 rounded-2xl border border-line bg-raise px-3.5 py-2.5 text-[13px]">
+      <div className="flex items-center gap-2">
+        <FilePen size={14} className="shrink-0 text-fg-2" />
+        <span className="flex-1 font-medium">
+          这次改动了 {files.length} 个文件{open.length ? "" : "，已全部撤销"}
+        </span>
+        {open.length > 0 && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              setError("");
+              await undoAll(messageId).catch((e: Error) => setError(e.message));
+              setBusy(false);
+            }}
+            className="flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 font-medium text-accent-text hover:bg-hover disabled:opacity-50"
+          >
+            {busy ? <Loader2 size={13} className="animate-spin" /> : <Undo2 size={13} />} 全部撤销
+          </button>
+        )}
+      </div>
+      <ul className="mt-1 space-y-0.5 pl-6 text-fg-2">
+        {files.map((f) => {
+          const last = changed.findLast((t) => t.undo!.path === f)!;
+          return (
+            <li key={f} className={clsx("truncate font-mono text-[12.5px]", last.undo!.undone && "text-fg-3 line-through")}>
+              {f} <span className="font-sans text-fg-3">{last.detail}</span>
+            </li>
+          );
+        })}
+      </ul>
+      {error && <div className="mt-1 text-bad">{error}</div>}
+    </div>
+  );
+}
+
+/** Under a plan written in plan mode: leave plan mode and carry it out. */
+function RunPlan({ chat }: { chat: string }) {
+  const busy = useBusy((s) => !!s[chat]);
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => {
+        setPlanMode(chat, false);
+        send(chat, RUN_PLAN);
+      }}
+      className="mt-1.5 flex h-9 w-fit items-center gap-1.5 rounded-full bg-accent px-4 text-[13px] font-semibold text-white hover:brightness-110 disabled:opacity-50"
+    >
+      <Play size={14} /> 按计划执行
+    </button>
+  );
+}
+
 /** Where the chat was compressed: later replies see this summary instead of the messages above it. */
 function Summary({ msg, agents }: { msg: Extract<Message, { kind: "text" }>; agents: Agent[] }) {
   if (msg.reset) {
@@ -274,6 +367,7 @@ export function MessageItem({
   last: boolean;
 }) {
   const showPanel = useUi((s) => s.showPanel);
+  const isLatest = useData((s) => s.messages.findLast((m) => m.chat === msg.chat)?.id === msg.id);
 
   if (msg.kind === "round") {
     const pass = msg.verdict === "pass" || msg.verdict === "done";
@@ -347,6 +441,7 @@ export function MessageItem({
         {hasBody && (
           <div className="rounded-[20px] bg-bubble px-4 py-2.5" data-reply={msg.text && !streaming ? msg.id : undefined}>
             {reasoning && <Reasoning text={reasoning} live={streaming && !msg.text} />}
+            {msg.kind === "text" && msg.todos?.length ? <Todos todos={msg.todos} /> : null}
             {tools && <ToolSteps steps={tools} messageId={msg.id} />}
             {msg.text ? <RichText text={msg.text} agents={agents} cites={citations(tools)} /> : streaming && !reasoning && <Typing />}
             {msg.kind === "review" && (
@@ -357,6 +452,8 @@ export function MessageItem({
           </div>
         )}
         {msg.kind === "text" && msg.files?.length ? <MadeFiles files={msg.files} /> : null}
+        {tools && !streaming && <Changes messageId={msg.id} tools={tools} />}
+        {msg.kind === "text" && msg.plan && !streaming && !failed && isLatest && <RunPlan chat={msg.chat} />}
         {failed && <Failure msg={msg} />}
         {!streaming && (
           <Meta

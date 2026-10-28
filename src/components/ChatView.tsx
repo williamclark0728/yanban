@@ -1,5 +1,7 @@
-import { ChevronLeft, Clock, FileUp, Lightbulb, PanelRight, PlugZap, Quote, X } from "lucide-react";
+import clsx from "clsx";
+import { ChevronLeft, ClipboardList, Clock, FileUp, Lightbulb, PanelRight, PlugZap, Quote, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { setPlanMode, usePlanMode } from "../lib/agentTools";
 import { compact, newTopic, stop, useBusy } from "../lib/chat";
 import { isDesktop } from "../lib/desktop";
 import { exportChat } from "../lib/export";
@@ -12,6 +14,7 @@ import { Composer, type Command, type ComposerHandle } from "./Composer";
 import { ContextMeter, EffortChip } from "./ContextMeter";
 import { MessageItem } from "./MessageItem";
 import { ModelChip } from "./ModelChip";
+import { TaskBoard } from "./TaskBoard";
 import { IconButton } from "./ui";
 
 const senderOf = (m?: Message) => (m && (m.kind === "text" || m.kind === "review") ? m.sender : undefined);
@@ -57,12 +60,32 @@ function SelectionBar({ picked, onQuote, onExplain }: { picked: Picked; onQuote:
   );
 }
 
+/** Plan mode for a private chat: the agent proposes a plan and changes nothing until the user says go. */
+function PlanChip({ chat }: { chat: string }) {
+  const on = usePlanMode((s) => !!s[chat]);
+  return (
+    <button
+      type="button"
+      onClick={() => setPlanMode(chat, !on)}
+      title={on ? "计划模式：先出方案，不改文件；点一下关闭" : "计划模式：先出方案给你确认，同意后再动手"}
+      className={clsx(
+        "hidden h-8 shrink-0 items-center gap-1 self-center rounded-full px-2.5 text-[13px] transition-colors sm:flex",
+        on ? "bg-accent-soft font-medium text-accent-text" : "text-fg-2 hover:bg-active hover:text-fg",
+      )}
+    >
+      <ClipboardList size={14} />
+      计划
+    </button>
+  );
+}
+
 export function ChatView() {
   const { agents, groups, messages, providers, defaultModel, markRead, updateAgent, skills } = useData();
   const { active, back, togglePanel, panelOpen, openSettings, openAside, setChip, setHelp } = useUi();
   const dev = usePrefs((s) => s.mode === "dev");
   const canQueue = usePrefs((s) => s.queue);
   const busy = useBusy((s) => (active ? !!s[active.id] : false));
+  const planOn = usePlanMode((s) => (active ? !!s[active.id] : false));
   const queued = useQueue((s) => (active ? s[active.id] : undefined));
   const scroller = useRef<HTMLDivElement>(null);
   const composer = useRef<ComposerHandle>(null);
@@ -138,6 +161,12 @@ export function ChatView() {
     { name: "clear", label: "开始新话题", hint: "之后的回复不带上面的对话，记录不删", run: () => newTopic(chatId) },
     ...(agent
       ? [
+          {
+            name: "plan",
+            label: planOn ? "退出计划模式" : "计划模式",
+            hint: "先出方案，确认后再动手",
+            run: () => setPlanMode(chatId, !planOn),
+          },
           { name: "model", label: "换模型", run: () => setChip("model") },
           { name: "effort", label: "思考强度", run: () => setChip("effort") },
           { name: "web", label: agent.web ? "关闭联网" : "打开联网", hint: `现在${agent.web ? "开着" : "关着"}`, run: () => updateAgent(agent.id, { web: !agent.web }) },
@@ -256,6 +285,7 @@ export function ChatView() {
             <span className="text-sm font-medium text-accent-text">去连接</span>
           </button>
         )}
+        {group && <TaskBoard group={group.id} />}
         {queued && queued.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5 px-1">
             {queued.map((q) => (
@@ -284,6 +314,7 @@ export function ChatView() {
               <>
                 <ModelChip agent={agent} />
                 <EffortChip agent={agent} />
+                <PlanChip chat={agent.id} />
               </>
             )
           }

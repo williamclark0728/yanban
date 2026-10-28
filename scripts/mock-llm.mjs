@@ -127,7 +127,22 @@ createServer(async (req, res) => {
   const tools = (payload.tools ?? []).map((t) => t.function?.name);
   const lastMsg = msgs.at(-1);
   let call = null;
-  if (lastMsg?.role === "tool") {
+  // 0.4.0 checks: "列步骤" ticks a step list, "问我" asks the user, "重复搜索" keeps calling the same search.
+  const toolCalls = msgs.filter((m) => m.role === "tool").length;
+  if (/列步骤/.test(last) && tools.includes("update_todos") && toolCalls < 3) {
+    const todos = ["读需求", "查资料", "写结论"].map((text, i) => ({ text, status: i < toolCalls ? "done" : i === toolCalls ? "in_progress" : "pending" }));
+    call = { name: "update_todos", arguments: { todos } };
+  } else if (/问我/.test(last) && tools.includes("ask_user") && lastMsg?.role !== "tool") {
+    call = { name: "ask_user", arguments: { question: "报告要用中文还是英文？", options: ["中文", "英文", "中英双语"] } };
+  } else if (/重复搜索/.test(last) && tools.includes("web_search") && toolCalls < 4) {
+    call = { name: "web_search", arguments: { query: "同一个问题" } };
+  } else if (lastMsg?.role === "tool" && /列步骤/.test(last)) {
+    reply = "三步都做完了。";
+  } else if (lastMsg?.role === "tool" && /重复搜索/.test(last)) {
+    reply = `最后一次工具结果：${String(lastMsg.content).slice(0, 60)}`;
+  } else if (lastMsg?.role === "tool" && /问我/.test(last)) {
+    reply = `收到：${String(lastMsg.content)}`;
+  } else if (lastMsg?.role === "tool") {
     const result = String(lastMsg.content);
     reply = result.startsWith("[1]")
       ? `根据搜索结果，${last.slice(0, 20)} 有三条相关信息 [1][2]，其中第三条较新 [3]。`

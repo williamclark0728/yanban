@@ -11,6 +11,7 @@ import { mcpTools } from "./mcp";
 import { FILE_RULES, fileTools, filesText } from "./outputs";
 import { skillRules, skillTools } from "./skills";
 import { workRules, workTools } from "./workmode";
+import { AGENT_RULES, askTool, guard, PLAN_RULES, readOnly, todoTool, usePlanMode } from "./agentTools";
 import { NATIVE_WEB_RULES, NO_WEB_RULES, tracer, WEB_RULES, webAccess, webPlan, type Report } from "./tools";
 
 /** Chats with work in flight. One run per chat; stopping a chat aborts all of its replies. */
@@ -196,10 +197,12 @@ export async function speak(opts: {
   messages: ModelMessage[];
   signal: AbortSignal;
   extraTools?: (report: Report) => ToolSet;
+  /** Plan mode: only tools that look, and a plan at the end instead of changes. */
+  plan?: boolean;
 }): Promise<Spoken> {
   const { providers, defaultModel, addMessage, patchMessage } = useData.getState();
   const id = uid();
-  addMessage({ id, chat: opts.chat, kind: "text", sender: opts.agent.id, text: "", status: "streaming", at: Date.now() });
+  addMessage({ id, chat: opts.chat, kind: "text", sender: opts.agent.id, text: "", status: "streaming", at: Date.now(), plan: opts.plan || undefined });
 
   const target = resolveModel(opts.agent, providers, defaultModel);
   if (!target) {
@@ -207,16 +210,19 @@ export async function speak(opts: {
     return { ok: false, text: "", tokens: 0, messageId: id };
   }
 
-  const { report, halt } = tracer(id);
+  const { report, halt, settle } = tracer(id);
   const web = webAccess(opts.agent, report);
-  const tools = {
+  const all: ToolSet = {
     ...web.tools,
+    ...todoTool(id),
+    ...askTool(report),
     ...fileTools(id, report, opts.agent),
     ...skillTools(report, opts.agent),
     ...workTools(opts.agent, report),
     ...(await mcpTools(report)),
     ...opts.extraTools?.(report),
   };
+  const tools = guard(opts.plan ? readOnly(all) : all, { agent: opts.agent, settle });
   const work = await workRules(opts.agent);
 
   let text = "";
@@ -239,7 +245,7 @@ export async function speak(opts: {
     const r = await streamReply({
       provider: target.provider,
       modelId: target.modelId,
-      system: [opts.system, FILE_RULES, skillRules(), work].filter(Boolean).join("\n\n"),
+      system: [opts.system, FILE_RULES, skillRules(), work, AGENT_RULES, opts.plan && PLAN_RULES].filter(Boolean).join("\n\n"),
       messages: opts.messages,
       params: opts.agent.params,
       signal: opts.signal,
@@ -303,6 +309,7 @@ export async function reply(agentId: string) {
       messages: context,
       signal: c.signal,
       extraTools: led.length ? (report) => dispatchTools(agent, led, report, asked?.attachments) : undefined,
+      plan: !!usePlanMode.getState()[agentId],
     });
   } finally {
     end(agentId);

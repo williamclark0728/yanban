@@ -1,6 +1,6 @@
 import { jsonSchema, tool, type ModelMessage, type ToolSet } from "ai";
 import { resolveModel, useData } from "../store";
-import type { Agent, Attachment, Baseline, Group, Issue, IssueStatus, Message, Run, RunRound, RunStep, TextMessage } from "../types";
+import type { Agent, Attachment, Baseline, BoardItem, Group, Issue, IssueStatus, Message, Run, RunRound, RunStep, TextMessage } from "../types";
 import {
   agentById,
   autoCompact,
@@ -378,7 +378,20 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
   const save = () => {
     if (!recorded) return;
     const steps = run.rounds.flatMap((r) => r.steps);
-    saveRun({ ...run, tokens: steps.reduce((n, s) => n + s.tokens, 0), rounds: run.rounds.map((r) => ({ ...r, steps: [...r.steps] })) });
+    saveRun({
+      ...run,
+      tokens: steps.reduce((n, s) => n + s.tokens, 0),
+      rounds: run.rounds.map((r) => ({ ...r, steps: [...r.steps] })),
+      board: run.board?.map((b) => ({ ...b })),
+    });
+  };
+  /** Moves one member's card on the task board. */
+  const mark = (agentId: string, type: BoardItem["type"], status: BoardItem["status"], note?: string) => {
+    const item = run.board?.find((b) => b.agentId === agentId && b.type === type);
+    if (!item) return;
+    item.status = status;
+    if (note !== undefined) item.note = note || undefined;
+    save();
   };
   const prompt = (instruction: string, limit = lead.params.history) => groupPrompt(group.id, limit, instruction, sinceId);
 
@@ -428,6 +441,10 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
     const takingTurns = !reviewers.length && (!!parsed?.speak || TAKE_TURNS.test(task));
 
     recorded = true;
+    run.board = [
+      ...assignments.map((a) => ({ agentId: a.agent.id, task: a.task, type: a.type, status: "waiting" as const })),
+      { agentId: lead.id, task: "汇总交付", type: "summary" as const, status: "waiting" as const },
+    ];
     const planStep: RunStep = {
       agentId: lead.id,
       type: "plan",
@@ -455,13 +472,14 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
           const work = (async () => {
             if (r === 1 && a.after) await finished.get(a.after.id);
             if (signal.aborted) return null;
+            mark(a.agent.id, "produce", "working", r === 1 ? "" : `第 ${r} 轮修订`);
             const instruction =
               r === 1
                 ? `${lead.name}分配给你的任务：${a.task}\n用户的原始需求：「${task}」\n${a.after ? `${a.after.name}的产出已在群聊记录里，在它的基础上完成你的任务。\n` : ""}产出要逐项满足原始需求里的每个要求，直接给出完整产出。`
                 : `第 ${r - 1} 轮审查意见（[成立] 必须修改，[存疑] 请补充依据或说明）：\n${feedback}\n\n请在你上一版的基础上修订，输出完整的新版本；最后加一段「修订说明」，逐条说明每个疑点改了什么或为什么不改。`;
             const out = await speak({ chat: group.id, agent: a.agent, system: groupSystem(a.agent, group), messages: prompt(instruction), signal });
             round.steps.push({ agentId: a.agent.id, type: r === 1 ? "draft" : "revise", summary: summarize(out.text) || "未完成", tokens: out.tokens, failed: !out.ok, messageId: out.messageId });
-            save();
+            mark(a.agent.id, "produce", out.ok ? "done" : "failed");
             return out;
           })();
           finished.set(a.agent.id, work);
@@ -476,6 +494,7 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
       const authors = writers.map((a) => a.agent);
       const reviews = await Promise.all(
         reviewers.map(async (a) => {
+          mark(a.agent.id, "review", "working", r === 1 ? "" : `第 ${r} 轮审查`);
           const t = await think({
             chat: group.id,
             agent: a.agent,
@@ -486,7 +505,7 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
           });
           if (!t.ok) {
             round.steps.push({ agentId: a.agent.id, type: "review", summary: "未完成", tokens: 0, failed: true, messageId: t.messageId });
-            save();
+            mark(a.agent.id, "review", "failed");
             return null;
           }
           const review = parseReview(t.text);
@@ -497,7 +516,7 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
             true,
           );
           round.steps.push({ agentId: a.agent.id, type: "review", summary: review.summary || "审查完成", issues: review.issues, tokens: t.tokens, messageId: t.messageId });
-          save();
+          mark(a.agent.id, "review", "done");
           return { reviewer: a.agent, issues: review.issues };
         }),
       );
@@ -533,7 +552,9 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
         : passed
         ? `审查已通过。请把最终成果交付给用户：先给出完整成品（以作者最新一版为准，不要改动已核实的内容，保留其中按用户要求列出的内容），再用几句话说明各成员的结论和修订经过。\n用户的原始需求：「${task}」`
         : `已到最多轮数，审查仍未全部通过。请交付作者最新一版的完整成品，并如实列出仍未解决的疑点：\n${unresolved}\n用户的原始需求：「${task}」`;
+    mark(lead.id, "summary", "working");
     const final = await speak({ chat: group.id, agent: lead, system: groupSystem(lead, group), messages: prompt(instruction, lead.params.history), signal });
+    mark(lead.id, "summary", final.ok ? "done" : "failed");
     run.rounds[run.rounds.length - 1].steps.push({ agentId: lead.id, type: "summary", summary: summarize(final.text) || "未完成", tokens: final.tokens, failed: !final.ok, messageId: final.messageId });
     delivered = final.text;
     run.status = final.ok ? "done" : signal.aborted ? "stopped" : "failed";

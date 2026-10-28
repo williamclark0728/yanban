@@ -134,7 +134,16 @@ export type TextMessage = Base & {
   summary?: boolean;
   /** With `summary`: a new topic (/clear). Replies see nothing before it, and the text is empty. */
   reset?: boolean;
+  /** The agent's step list for this reply (update_todos). */
+  todos?: Todo[];
+  /** Written in plan mode: a plan the user can approve with one click. */
+  plan?: boolean;
 };
+
+export interface Todo {
+  text: string;
+  status: "pending" | "in_progress" | "done";
+}
 
 export type FileFormat = "md" | "docx" | "xlsx" | "pptx";
 
@@ -176,7 +185,7 @@ export interface Source {
 
 export interface ToolTrace {
   id: string;
-  name: "web_search" | "read_page" | "dispatch_to_group" | "make_file" | "use_skill" | "install_skill" | "mcp" | LocalTool;
+  name: "web_search" | "read_page" | "dispatch_to_group" | "make_file" | "use_skill" | "install_skill" | "mcp" | "ask_user" | LocalTool;
   /** One line for the UI, e.g. the search query or the group name. */
   label: string;
   /** "waiting": a local action waits for the user's approval. */
@@ -191,6 +200,9 @@ export interface ToolTrace {
   first?: number;
   /** The group a dispatch went to. */
   groupId?: string;
+  /** ask_user: the question, its suggested answers, and what the user said. */
+  question?: { text: string; options: string[] };
+  answer?: string;
 }
 
 /** A skill in the common SKILL.md format: when to use it (description) and the instructions (body). */
@@ -288,6 +300,17 @@ export interface Run {
   consensus?: Group["consensus"];
   maxRounds?: number;
   baseline?: Baseline;
+  /** Who is doing what in this run, shown above the composer while it runs. */
+  board?: BoardItem[];
+}
+
+export interface BoardItem {
+  agentId: string;
+  task: string;
+  type: "produce" | "review" | "summary";
+  status: "waiting" | "working" | "done" | "failed";
+  /** e.g. "第 2 轮修订" */
+  note?: string;
 }
 
 export type Protocol = "openai-chat" | "openai-responses" | "anthropic" | "gemini";

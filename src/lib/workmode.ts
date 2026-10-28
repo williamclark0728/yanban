@@ -69,6 +69,14 @@ export async function undo(messageId: string, traceId: string) {
   patchMessage(messageId, { tools: msg.tools!.map((t) => (t.id === traceId ? { ...t, undo: { ...trace.undo!, undone: true }, detail: "已撤销" } : t)) }, true);
 }
 
+/** Undoes every file change of a reply, newest first, so a file changed twice ends up as it was. */
+export async function undoAll(messageId: string) {
+  const msg = useData.getState().messages.find((m) => m.id === messageId);
+  if (!msg || msg.kind === "round") return;
+  const changes = (msg.tools ?? []).filter((t) => t.undo && !t.undo.undone).reverse();
+  for (const t of changes) await undo(messageId, t.id);
+}
+
 // ---------- prompt ----------
 
 /** Work-mode rules plus the workspace's AGENTS.md, which serves as the agent's memory for that folder. */

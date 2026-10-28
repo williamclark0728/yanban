@@ -19,7 +19,12 @@ export function tracer(messageId: string) {
   };
   /** Steps still running when the reply stops are marked as stopped. */
   const halt = () => traces.filter((t) => t.status === "running" || t.status === "waiting").forEach((t) => report({ ...t, status: "error", detail: "已停止" }));
-  return { report, halt };
+  /** Ends a step that is still running, e.g. when it timed out. */
+  const settle = (id: string, detail: string) => {
+    const t = traces.find((x) => x.id === id);
+    if (t?.status === "running") report({ ...t, status: "error", detail });
+  };
+  return { report, halt, settle };
 }
 
 /**

@@ -12,7 +12,7 @@ const KEYS: [string, string][] = [
 ];
 
 const TRIGGERS: [string, string][] = [
-  ["/", "命令：/compact 压缩上下文、/clear 开始新话题、/model 换模型、/effort 思考强度、/web 联网开关、/export 导出对话、/help 本页"],
+  ["/", "命令：/compact 压缩上下文、/clear 开始新话题、/plan 计划模式、/model 换模型、/effort 思考强度、/web 联网开关、/export 导出对话、/help 本页"],
   ["$", "选一个技能，这次对话按它的说明做"],
   ["@", "群聊里指定成员；桌面版工作模式下还能选工作区里的文件，内容直接附上"],
   ["选中回答里的文字", "弹出「引用」和「讲解」：引用到输入框，或在右侧单独讲解这一段"],

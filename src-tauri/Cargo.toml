@@ -1,6 +1,6 @@
 [package]
 name = "yanban"
-version = "0.3.0"
+version = "0.4.0"
 description = "研伴桌面版"
 edition = "2021"
 rust-version = "1.80"
