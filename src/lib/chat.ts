@@ -15,6 +15,9 @@ import { AGENT_RULES, askTool, guard, PLAN_RULES, readOnly, todoTool, usePlanMod
 import { requeueSteers, takeSteers } from "./inbox";
 import { NEXT_RULES, splitNext, useCompare, withoutAlternatives } from "./compare";
 import { MEMORY_RULES, memoryLines, memoryTools } from "./memory";
+import { libraryRules, libraryTools } from "./library";
+import { DELEGATE_RULES, delegateTool } from "./subagent";
+import { afterReply, goalRules } from "./goal";
 import { NATIVE_WEB_RULES, NO_WEB_RULES, tracer, WEB_RULES, webAccess, webPlan, type Report } from "./tools";
 
 /** Chats with work in flight. One run per chat; stopping a chat aborts all of its replies. */
@@ -242,6 +245,7 @@ export async function speak(opts: {
     ...todoTool(id),
     ...askTool(report),
     ...memoryTools(report, agent, id),
+    ...libraryTools(report),
     ...fileTools(id, report, agent),
     ...skillTools(report, agent),
     ...workTools(agent, report),
@@ -271,7 +275,7 @@ export async function speak(opts: {
     const r = await streamReply({
       provider: target.provider,
       modelId: target.modelId,
-      system: [opts.system, FILE_RULES, skillRules(), work, AGENT_RULES, MEMORY_RULES, opts.plan && PLAN_RULES, opts.suggest && usePrefs.getState().suggest && NEXT_RULES]
+      system: [opts.system, FILE_RULES, skillRules(), work, AGENT_RULES, MEMORY_RULES, libraryRules(), opts.plan && PLAN_RULES, opts.suggest && usePrefs.getState().suggest && NEXT_RULES]
         .filter(Boolean)
         .join("\n\n"),
       messages: opts.messages,
@@ -334,6 +338,10 @@ export async function sendToAgent(agentId: string, text: string, attachments?: A
   await autoCompact(agentId);
   useData.getState().addMessage({ id: uid(), chat: agentId, kind: "text", sender: "me", text, attachments, at: Date.now() });
   await reply(agentId);
+  // A session goal carries on by itself; a message the user queued meanwhile goes first.
+  void afterReply(agentId, (next) => {
+    if (!useBusy.getState()[agentId]) void sendToAgent(agentId, next);
+  });
 }
 
 export async function reply(agentId: string) {
@@ -351,10 +359,11 @@ export async function reply(agentId: string) {
     const turn = {
       chat: agentId,
       agent,
-      system: led.length ? `${base}\n\n${dispatchRules(led)}` : base,
+      system: [base, led.length && dispatchRules(led), DELEGATE_RULES, goalRules(agentId)].filter(Boolean).join("\n\n"),
       messages: context,
       signal: c.signal,
-      extraTools: led.length ? (report: Report) => dispatchTools(agent, led, report, asked?.attachments) : undefined,
+      // Sub-agents only start from private chats, so they never hand work on again.
+      extraTools: (report: Report) => ({ ...delegateTool(agent, report), ...(led.length ? dispatchTools(agent, led, report, asked?.attachments) : {}) }),
       plan: !!usePlanMode.getState()[agentId],
       suggest: true,
     };

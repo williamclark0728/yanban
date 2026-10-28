@@ -149,6 +149,8 @@ export type TextMessage = Base & {
   /** In a comparison: the model that wrote this one, and whether the user picked it to carry on. */
   model?: string;
   chosen?: boolean;
+  /** The reasoning translated into Chinese, when the model thought in English. */
+  reasoningZh?: string;
   /** What the user will likely want next, offered as buttons under the reply. */
   next?: string[];
 };
@@ -207,7 +209,7 @@ export interface Source {
 
 export interface ToolTrace {
   id: string;
-  name: "web_search" | "read_page" | "dispatch_to_group" | "make_file" | "use_skill" | "install_skill" | "mcp" | "ask_user" | "remember" | "search_chats" | LocalTool;
+  name: "web_search" | "read_page" | "dispatch_to_group" | "make_file" | "use_skill" | "install_skill" | "mcp" | "ask_user" | "remember" | "search_chats" | "search_library" | "delegate" | LocalTool;
   /** One line for the UI, e.g. the search query or the group name. */
   label: string;
   /** "waiting": a local action waits for the user's approval. */
@@ -225,6 +227,38 @@ export interface ToolTrace {
   /** ask_user: the question, its suggested answers, and what the user said. */
   question?: { text: string; options: string[] };
   answer?: string;
+  /** search_library: the passages found, with where each came from. */
+  passages?: { title: string; text: string }[];
+  /** delegate: what the sub-agent handed back. */
+  output?: string;
+}
+
+/** A folder of papers and notes the agents can search (search_library). The text lives in the chunks table. */
+export interface Library {
+  id: string;
+  name: string;
+  enabled: boolean;
+  docs: LibraryDoc[];
+  at: number;
+}
+
+export interface LibraryDoc {
+  id: string;
+  name: string;
+  size: number;
+  chars: number;
+  chunks: number;
+  at: number;
+}
+
+/** One passage of a library document, about a paragraph or two, with its page or line range. */
+export interface Chunk {
+  id: string;
+  lib: string;
+  doc: string;
+  name: string;
+  loc: string;
+  text: string;
 }
 
 /** A skill in the common SKILL.md format: when to use it (description) and the instructions (body). */

@@ -107,6 +107,11 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Settings → 对话宽度 sets this; it is the widest the conversation column gets. */
+:root {
+  --chat-w: 820px;
+}
+
 /* Settings → 消息字号. Most UI text has fixed sizes; messages follow the body size. */
 :root[data-size="small"] body {
   font-size: 13px;

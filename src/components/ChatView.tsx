@@ -11,6 +11,7 @@ import { resolveModel, useData, usePrefs, useUi } from "../store";
 import type { Attachment, Message, TextMessage } from "../types";
 import { BotAvatar, GroupAvatar } from "./Avatar";
 import { CompareChip, CompareRow } from "./Compare";
+import { GoalBar } from "./Goal";
 import { Composer, type Command, type ComposerHandle } from "./Composer";
 import { ContextMeter, EffortChip } from "./ContextMeter";
 import { MessageItem } from "./MessageItem";
@@ -93,6 +94,7 @@ export function ChatView() {
   const [dragging, setDragging] = useState(false);
   const [picked, setPicked] = useState<Picked | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const [goalEdit, setGoalEdit] = useState(false);
   const flashTimer = useRef(0);
   const stick = useRef(true);
 
@@ -136,6 +138,7 @@ export function ChatView() {
     if (chatId) markRead(chatId);
     stick.current = true;
     setChip(null);
+    setGoalEdit(false);
   }, [chatId, markRead, setChip]);
 
   // Follow new content while the user is at the bottom.
@@ -192,6 +195,7 @@ export function ChatView() {
           },
           { name: "model", label: "换模型", run: () => setChip("model") },
           { name: "compare", label: "多模型对比", hint: "选 2–3 个模型同时回答", run: () => setChip("compare") },
+          { name: "goal", label: "设定目标", hint: "智能体自动接着做，直到完成或到轮数上限", run: () => setGoalEdit(true) },
           { name: "effort", label: "思考强度", run: () => setChip("effort") },
           { name: "web", label: agent.web ? "关闭联网" : "打开联网", hint: `现在${agent.web ? "开着" : "关着"}`, run: () => updateAgent(agent.id, { web: !agent.web }) },
         ]
@@ -262,7 +266,7 @@ export function ChatView() {
           if (picked) setPicked(readSelection(el));
         }}
       >
-        <div className="mx-auto w-full max-w-[820px] px-4 pb-6 pt-20 md:px-6">
+        <div className="mx-auto w-full max-w-[var(--chat-w)] px-4 pb-6 pt-20 md:px-6">
           {list.length === 0 && agent && (
             <div className="flex flex-col items-center pt-[12vh] text-center">
               <BotAvatar agent={agent} size={72} />
@@ -307,7 +311,7 @@ export function ChatView() {
         </div>
       </div>
 
-      <div className="mx-auto w-full max-w-[820px] px-3 pb-[max(12px,env(safe-area-inset-bottom))] pt-1 md:px-5 md:pb-5">
+      <div className="mx-auto w-full max-w-[var(--chat-w)] px-3 pb-[max(12px,env(safe-area-inset-bottom))] pt-1 md:px-5 md:pb-5">
         {agent && !target && (
           <button
             type="button"
@@ -322,6 +326,7 @@ export function ChatView() {
           </button>
         )}
         {group && <TaskBoard group={group.id} />}
+        {agent && <GoalBar chat={agent.id} editing={goalEdit} onClose={() => setGoalEdit(false)} send={(t) => sendNowOrInsert(agent.id, t)} />}
         {inserted && inserted.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5 px-1">
             {inserted.map((q) => (
@@ -371,6 +376,7 @@ export function ChatView() {
         <Composer
           ref={composer}
           key={chatId}
+          draft={chatId}
           placeholder={group ? `发消息给 ${name}，@ 指定成员，/ 命令，$ 技能` : `发消息给 ${name}，/ 命令，$ 技能`}
           members={members}
           busy={busy}

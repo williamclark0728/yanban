@@ -1,10 +1,11 @@
-import { Bookmark, BookOpen, Check, Download, FolderOpen, Pencil, Plug, Plus, Trash2, Upload, X } from "lucide-react";
+import { Bookmark, BookOpen, Check, Download, FileText, FolderOpen, LibraryBig, Loader2, Pencil, Plug, Plus, Trash2, Upload, X } from "lucide-react";
 import { useRef, useState, type InputHTMLAttributes } from "react";
 import { importConfig, saveConfigFile } from "../lib/config";
 import { isDesktop, pickFolder } from "../lib/desktop";
 import { describeError } from "../lib/llm";
 import { testMcp } from "../lib/mcp";
 import { parseSkill, skillsOnDisk } from "../lib/skills";
+import { addDoc, createLibrary, deleteLibrary, removeDoc } from "../lib/library";
 import { addMemory } from "../lib/memory";
 import { useData, usePrefs } from "../store";
 import type { McpServer, Memory, Skill } from "../types";
@@ -443,6 +444,131 @@ export function MemorySettings() {
       ) : (
         <div className="rounded-2xl border border-dashed border-line px-4 py-8 text-center text-sm text-fg-3">还没有记忆</div>
       )}
+    </div>
+  );
+}
+
+// ---------- knowledge base ----------
+
+const LIBRARY_FILES = /\.(pdf|docx|pptx|xlsx|xls|csv|md|markdown|txt|tex|bib|json|html?)$/i;
+
+export function LibrarySettings() {
+  const { libraries, setLibraries } = useData();
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState<{ lib: string; done: number; total: number; current: string } | null>(null);
+  const [status, setStatus] = useState<Status>(null);
+  const files = useRef<HTMLInputElement>(null);
+  const folder = useRef<HTMLInputElement>(null);
+  const target = useRef("");
+  // Deleting a library takes two clicks.
+  const [armed, setArmed] = useState<string | null>(null);
+
+  const add = async (list: FileList | null) => {
+    const picked = [...(list ?? [])].filter((f) => LIBRARY_FILES.test(f.name));
+    const lib = target.current;
+    if (!picked.length) return setStatus({ kind: "error", text: "没有可以加入的文件（支持 PDF、Word、PPT、Excel、Markdown、文本）" });
+    const failed: string[] = [];
+    let chunks = 0;
+    for (let i = 0; i < picked.length; i++) {
+      setBusy({ lib, done: i, total: picked.length, current: picked[i].name });
+      try {
+        chunks += (await addDoc(lib, picked[i])).chunks;
+      } catch (e) {
+        failed.push(`${picked[i].name}（${(e as Error).message}）`);
+      }
+    }
+    setBusy(null);
+    const ok = picked.length - failed.length;
+    setStatus(
+      failed.length
+        ? { kind: ok ? "ok" : "error", text: `加入 ${ok} 个文件、${chunks} 段；${failed.length} 个没加入：${failed.join("、")}` }
+        : { kind: "ok", text: `加入 ${ok} 个文件，切成 ${chunks} 段` },
+    );
+  };
+
+  const pick = (lib: string, input: HTMLInputElement | null) => {
+    target.current = lib;
+    setStatus(null);
+    input?.click();
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="px-1 text-[13px] text-fg-3">
+        把论文、笔记、讲义加进资料库，智能体回答时会先检索相关段落，并标出处（文件名和页码）。文字存在本机浏览器里，按关键词检索，不需要额外的模型。扫描版 PDF 没有文字，检索不到。
+      </p>
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!name.trim()) return;
+          createLibrary(name);
+          setName("");
+        }}
+      >
+        <input className={`${inputCls} h-10`} value={name} onChange={(e) => setName(e.target.value)} placeholder="新资料库的名字，比如 模型压缩论文" maxLength={40} />
+        <button type="submit" className={solid} disabled={!name.trim()}>
+          新建
+        </button>
+      </form>
+      <input ref={files} type="file" hidden multiple onChange={(e) => void add(e.target.files).finally(() => (e.target.value = ""))} />
+      <input ref={folder} type="file" hidden multiple {...folderPicker} onChange={(e) => void add(e.target.files).finally(() => (e.target.value = ""))} />
+      <StatusBox status={status} />
+      {libraries.length === 0 && <div className="rounded-2xl border border-dashed border-line px-4 py-8 text-center text-sm text-fg-3">还没有资料库</div>}
+      {libraries.map((l) => (
+        <div key={l.id} className="rounded-2xl border border-line bg-raise">
+          <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+            <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent-text">
+              <LibraryBig size={17} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium">{l.name}</div>
+              <div className="text-[13px] text-fg-3">
+                {l.docs.length} 个文件 · {l.docs.reduce((n, d) => n + d.chunks, 0)} 段
+              </div>
+            </div>
+            {armed === l.id ? (
+              <button type="button" onClick={() => void deleteLibrary(l.id)} className="h-8 rounded-full bg-bad px-3 text-[13px] font-semibold text-white">
+                再点一次删除
+              </button>
+            ) : (
+              <IconButton aria-label="删除资料库" onClick={() => setArmed(l.id)}>
+                <Trash2 size={16} />
+              </IconButton>
+            )}
+            <Switch checked={l.enabled} onChange={(enabled) => setLibraries(libraries.map((x) => (x.id === l.id ? { ...x, enabled } : x)))} label={`启用 ${l.name}`} />
+          </div>
+          <div className="flex flex-wrap gap-2 border-t border-line px-4 py-3">
+            <button type="button" className={outline} disabled={!!busy} onClick={() => pick(l.id, files.current)}>
+              <Upload size={15} /> 添加文件
+            </button>
+            <button type="button" className={outline} disabled={!!busy} onClick={() => pick(l.id, folder.current)}>
+              <FolderOpen size={15} /> 添加文件夹
+            </button>
+            {busy?.lib === l.id && (
+              <span className="flex items-center gap-2 text-[13px] text-fg-2">
+                <Loader2 size={14} className="animate-spin" /> 正在读取 {busy.done + 1}/{busy.total}：{busy.current}
+              </span>
+            )}
+          </div>
+          {l.docs.length > 0 && (
+            <ul className="max-h-64 divide-y divide-line overflow-auto border-t border-line">
+              {[...l.docs].sort((a, b) => a.name.localeCompare(b.name)).map((d) => (
+                <li key={d.id} className="flex items-center gap-2 px-4 py-2 text-[13.5px]">
+                  <FileText size={14} className="shrink-0 text-fg-3" />
+                  <span className="min-w-0 flex-1 truncate">{d.name}</span>
+                  <span className="shrink-0 text-[12px] text-fg-3">
+                    {d.chars < 10000 ? `${d.chars} 字` : `${(d.chars / 10000).toFixed(1)} 万字`} · {d.chunks} 段
+                  </span>
+                  <IconButton aria-label={`移除 ${d.name}`} className="size-7" onClick={() => void removeDoc(l.id, d.id)}>
+                    <X size={14} />
+                  </IconButton>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

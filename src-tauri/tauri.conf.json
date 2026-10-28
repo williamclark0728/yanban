@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Yanban",
   "mainBinaryName": "yanban",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "identifier": "top.shengzy.yanban",
   "build": {
     "frontendDist": "../dist",

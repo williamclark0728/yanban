@@ -4,11 +4,11 @@ import { presets, fromPreset } from "./lib/catalog";
 import { addExamples, db, ensureSeeded, getKv, setKv } from "./lib/db";
 import { isDesktop } from "./lib/desktop";
 import { loadUsage } from "./lib/usage";
-import type { Agent, ChatRef, Group, McpServer, Memory, Message, ModelParams, ModelRef, Provider, Run, SearchConfig, Skill, TeamTemplate } from "./types";
+import type { Agent, ChatRef, Group, Library, McpServer, Memory, Message, ModelParams, ModelRef, Provider, Run, SearchConfig, Skill, TeamTemplate } from "./types";
 
 export type Theme = "dark" | "light" | "system";
 export type PanelTab = "info" | "members" | "runs" | "memory";
-export type SettingsTab = "general" | "providers" | "search" | "skills" | "mcp" | "memory" | "usage";
+export type SettingsTab = "general" | "providers" | "search" | "skills" | "mcp" | "library" | "memory" | "usage";
 
 /** Desktop work mode: which local actions need the user's OK. Dangerous commands always do. */
 export type Approval = "ask" | "read" | "full";
@@ -31,12 +31,19 @@ interface Prefs {
   autoMemory: boolean;
   /** Replies may end with suggested next steps, shown as buttons. */
   suggest: boolean;
+  /** Widest the conversation column gets, in pixels; CHAT_WIDTH_MAX fills the window. */
+  chatWidth: number;
   setMode: (mode: Prefs["mode"]) => void;
   setTheme: (theme: Theme) => void;
   setName: (name: string) => void;
   setApproval: (approval: Approval) => void;
-  set: (patch: Partial<Pick<Prefs, "fontSize" | "steps" | "zoom" | "autoMemory" | "suggest">>) => void;
+  set: (patch: Partial<Pick<Prefs, "fontSize" | "steps" | "zoom" | "autoMemory" | "suggest" | "chatWidth">>) => void;
 }
+
+export const CHAT_WIDTH_MIN = 640;
+export const CHAT_WIDTH_MAX = 1600;
+/** Most rounds of review and revision a group may run. */
+export const MAX_ROUNDS = 10;
 
 export const ZOOM_MIN = 0.6;
 export const ZOOM_MAX = 2;
@@ -59,6 +66,7 @@ export const usePrefs = create<Prefs>()(
       zoom: 1,
       autoMemory: true,
       suggest: true,
+      chatWidth: 820,
       setMode: (mode) => set({ mode }),
       setTheme: (theme) => set({ theme }),
       setName: (name) => set({ name: name.slice(0, 20) }),
@@ -173,6 +181,9 @@ interface Data {
   /** Long-term memory about the user, shared by every agent. */
   memories: Memory[];
   setMemories: (memories: Memory[]) => void;
+  /** Knowledge bases; their passages are in the chunks table. */
+  libraries: Library[];
+  setLibraries: (libraries: Library[]) => void;
   /** The site's own web search, when the server offers it. */
   siteSearch: { limit: number; remaining: number } | null;
   refreshSiteSearch: () => Promise<void>;
@@ -242,10 +253,11 @@ export const useData = create<Data>()((set, get) => ({
   skills: [],
   mcpServers: [],
   memories: [],
+  libraries: [],
 
   load: async () => {
     await ensureSeeded();
-    const [stored, groups, messages, runs, providers, defaultModel, search, templates, skills, mcpServers, uncapped, memories] = await Promise.all([
+    const [stored, groups, messages, runs, providers, defaultModel, search, templates, skills, mcpServers, uncapped, memories, libraries] = await Promise.all([
       db.agents.toArray(),
       db.groups.toArray(),
       db.messages.orderBy("at").toArray(),
@@ -258,6 +270,7 @@ export const useData = create<Data>()((set, get) => ({
       getKv<McpServer[]>("mcpServers", []),
       getKv("uncapped", false),
       getKv<Memory[]>("memories", []),
+      getKv<Library[]>("libraries", []),
     ]);
     // Replies used to stop at 2048 tokens by default, which cut long files short. That default now means no cap.
     const agents = uncapped ? stored : stored.map((a) => (a.params.maxTokens === 2048 ? { ...a, params: { ...a.params, maxTokens: 0 } } : a));
@@ -273,7 +286,7 @@ export const useData = create<Data>()((set, get) => ({
         : m,
     );
     const trial = get().trial;
-    set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(trial ? [...providers, trialProvider(trial)] : providers), defaultModel, search, templates, skills, mcpServers, memories });
+    set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(trial ? [...providers, trialProvider(trial)] : providers), defaultModel, search, templates, skills, mcpServers, memories, libraries });
     void get().refreshTrial();
     void get().refreshSiteSearch();
   },
@@ -328,6 +341,11 @@ export const useData = create<Data>()((set, get) => ({
   setMcpServers: (mcpServers) => {
     set({ mcpServers });
     void setKv("mcpServers", mcpServers);
+  },
+
+  setLibraries: (libraries) => {
+    set({ libraries });
+    void setKv("libraries", libraries);
   },
 
   setMemories: (memories) => {

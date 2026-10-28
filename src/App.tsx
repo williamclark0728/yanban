@@ -9,7 +9,7 @@ import { Shortcuts } from "./components/Shortcuts";
 import { Sidebar } from "./components/Sidebar";
 import { UpdateCard } from "./components/UpdateCard";
 import { isDesktop, setZoom } from "./lib/desktop";
-import { stepZoom, useData, usePrefs, useUi } from "./store";
+import { CHAT_WIDTH_MAX, stepZoom, useData, usePrefs, useUi } from "./store";
 
 function useMedia(query: string) {
   return useSyncExternalStore(
@@ -34,6 +34,11 @@ function useTheme() {
   useEffect(() => {
     document.documentElement.dataset.size = size;
   }, [size]);
+  // How wide the conversation column may get; at the top of the range it fills the window.
+  const width = usePrefs((s) => s.chatWidth);
+  useEffect(() => {
+    document.documentElement.style.setProperty("--chat-w", width >= CHAT_WIDTH_MAX ? "100%" : `${width}px`);
+  }, [width]);
 }
 
 /**

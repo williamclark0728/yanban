@@ -2,7 +2,7 @@ import clsx from "clsx";
 import { ChevronLeft, Minus, Pencil, Plus, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { builtInTemplates, existingFor, freeGroupName, instantiate, snapshot } from "../lib/templates";
-import { useData, useUi } from "../store";
+import { MAX_ROUNDS, useData, useUi } from "../store";
 import type { Agent, TeamTemplate, TemplateMember } from "../types";
 import { BotAvatar, GroupAvatar } from "./Avatar";
 import { Actions, DangerButton, Field, inputCls, Modal } from "./Editors";
@@ -269,7 +269,7 @@ export function TemplateEditor({ id, onClose }: { id: string; onClose: () => voi
               <Minus size={15} />
             </IconButton>
             <span className="w-6 text-center font-semibold tabular-nums">{draft.maxRounds}</span>
-            <IconButton aria-label="增加" className="size-7" onClick={() => set({ maxRounds: Math.min(6, draft.maxRounds + 1) })}>
+            <IconButton aria-label="增加" className="size-7" onClick={() => set({ maxRounds: Math.min(MAX_ROUNDS, draft.maxRounds + 1) })}>
               <Plus size={15} />
             </IconButton>
           </div>

@@ -29,11 +29,11 @@ const numberLines = (text: string) =>
     .map((line, i) => `${i + 1}| ${line}`)
     .join("\n");
 
-function cap(text: string) {
-  return text.length > MAX_CHARS ? { text: text.slice(0, MAX_CHARS), truncated: true } : { text, truncated: false };
+function cap(text: string, max = MAX_CHARS) {
+  return text.length > max ? { text: text.slice(0, max), truncated: true } : { text, truncated: false };
 }
 
-async function readPdf(file: File) {
+async function readPdf(file: File, max: number) {
   const pdfjs = await import("pdfjs-dist");
   const worker = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
   pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
@@ -46,7 +46,7 @@ async function readPdf(file: File) {
   }).promise;
   const pages: string[] = [];
   let total = 0;
-  for (let n = 1; n <= doc.numPages && total < MAX_CHARS; n++) {
+  for (let n = 1; n <= doc.numPages && total < max; n++) {
     const content = await (await doc.getPage(n)).getTextContent();
     let page = "";
     for (const item of content.items) {
@@ -59,16 +59,16 @@ async function readPdf(file: File) {
   }
   const joined = pages.join("\n\n");
   if (!joined.replace(/【第 \d+ 页】/g, "").trim()) throw new FileReadError("这个 PDF 没有可提取的文字（可能是扫描件）");
-  const { text, truncated } = cap(joined);
+  const { text, truncated } = cap(joined, max);
   return { text, truncated: truncated || pages.length < doc.numPages, pages: doc.numPages };
 }
 
-async function readDocx(file: File) {
+async function readDocx(file: File, max: number) {
   const mammoth = await import("mammoth");
   const { value } = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
   const paragraphs = value.split(/\n+/).map((p) => p.trim()).filter(Boolean).join("\n");
   if (!paragraphs) throw new FileReadError("这个 Word 文件里没有文字");
-  return cap(numberLines(paragraphs));
+  return cap(numberLines(paragraphs), max);
 }
 
 const unescapeXml = (s: string) =>
@@ -83,15 +83,15 @@ const paragraphs = (xml: string) =>
     .map((p) => [...p.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((m) => unescapeXml(m[1])).join("").trim())
     .filter(Boolean);
 
-async function readSheet(file: File) {
+async function readSheet(file: File, max: number) {
   const XLSX = await import("xlsx");
   const book = XLSX.read(await file.arrayBuffer());
   const sheets = book.SheetNames.map((n) => ({ n, csv: XLSX.utils.sheet_to_csv(book.Sheets[n], { blankrows: false }).trim() })).filter((s) => s.csv);
   if (!sheets.length) throw new FileReadError("这个表格是空的");
-  return cap(sheets.map((s) => `【工作表 ${s.n}】\n${s.csv}`).join("\n\n"));
+  return cap(sheets.map((s) => `【工作表 ${s.n}】\n${s.csv}`).join("\n\n"), max);
 }
 
-async function readSlides(file: File) {
+async function readSlides(file: File, max: number) {
   const { unzipSync, strFromU8 } = await import("fflate");
   const parts = unzipSync(new Uint8Array(await file.arrayBuffer()), {
     filter: (f) => /^ppt\/(slides\/slide|notesSlides\/notesSlide)\d+\.xml$/.test(f.name),
@@ -108,7 +108,7 @@ async function readSlides(file: File) {
       return [`【第 ${n} 页】`, ...paragraphs(strFromU8(parts[name])), said.length ? `讲稿：${said.join(" ")}` : ""].filter(Boolean).join("\n");
     })
     .join("\n\n");
-  return { ...cap(text), pages: slides.length };
+  return { ...cap(text, max), pages: slides.length };
 }
 
 /** Zip entry names without the UTF-8 flag are usually GBK on Chinese Windows; fflate reads them as Latin-1. */
@@ -188,17 +188,18 @@ async function readImage(file: File): Promise<{ image: string; mime: string }> {
   }
 }
 
-export async function readAttachment(file: File): Promise<Attachment> {
+/** `max` caps the text kept per file; the knowledge base reads whole papers with a larger one. */
+export async function readAttachment(file: File, max = MAX_CHARS): Promise<Attachment> {
   const name = file.name.toLowerCase();
   const limit = ARCHIVE_EXT.test(name) ? MAX_ZIP_BYTES : MAX_FILE_BYTES;
   if (file.size > limit) throw new FileReadError(`超过 ${formatSize(limit)}`);
   const base = { id: crypto.randomUUID(), name: file.name || "粘贴的图片", size: file.size, mime: file.type };
 
   if (file.type.startsWith("image/")) return { ...base, kind: "image", ...(await readImage(file)) };
-  if (name.endsWith(".pdf") || file.type === "application/pdf") return { ...base, kind: "pdf", ...(await readPdf(file)) };
-  if (name.endsWith(".docx")) return { ...base, kind: "docx", ...(await readDocx(file)) };
-  if (name.endsWith(".pptx")) return { ...base, kind: "slides", ...(await readSlides(file)) };
-  if (SHEET_EXT.test(name)) return { ...base, kind: "sheet", ...(await readSheet(file)) };
+  if (name.endsWith(".pdf") || file.type === "application/pdf") return { ...base, kind: "pdf", ...(await readPdf(file, max)) };
+  if (name.endsWith(".docx")) return { ...base, kind: "docx", ...(await readDocx(file, max)) };
+  if (name.endsWith(".pptx")) return { ...base, kind: "slides", ...(await readSlides(file, max)) };
+  if (SHEET_EXT.test(name)) return { ...base, kind: "sheet", ...(await readSheet(file, max)) };
   if (ARCHIVE_EXT.test(name)) return { ...base, kind: "zip", ...(await readZip(file)) };
   if (name.endsWith(".doc")) throw new FileReadError("旧版 .doc 请另存为 .docx 再上传");
   if (name.endsWith(".ppt")) throw new FileReadError("旧版 .ppt 请另存为 .pptx 再上传");
@@ -208,7 +209,7 @@ export async function readAttachment(file: File): Promise<Attachment> {
   if (raw.includes("\u0000") || (raw.match(/�/g)?.length ?? 0) > raw.length / 50) {
     throw new FileReadError("暂不支持这种文件，可以上传文本、代码、PDF、Word、Excel、PPT、zip 压缩包或图片");
   }
-  return { ...base, kind: "text", ...cap(numberLines(raw)) };
+  return { ...base, kind: "text", ...cap(numberLines(raw), max) };
 }
 
 /** Text blocks appended to the user's message so any model can read the files. */

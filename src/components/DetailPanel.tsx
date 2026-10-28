@@ -1,6 +1,6 @@
 import { ChevronRight, LayoutTemplate, Minus, Pencil, Plus, X } from "lucide-react";
 import { useState } from "react";
-import { resolveModel, usePrefs, useData, useUi, type PanelTab } from "../store";
+import { MAX_ROUNDS, resolveModel, usePrefs, useData, useUi, type PanelTab } from "../store";
 import { ModelPicker } from "./ModelPicker";
 import type { Agent, Group } from "../types";
 import { BotAvatar, GroupAvatar } from "./Avatar";
@@ -103,7 +103,7 @@ function GroupInfo({ group }: { group: Group }) {
               <IconButton
                 aria-label="增加"
                 className="size-7"
-                onClick={() => setMaxRounds(group.id, Math.min(6, group.maxRounds + 1))}
+                onClick={() => setMaxRounds(group.id, Math.min(MAX_ROUNDS, group.maxRounds + 1))}
               >
                 <Plus size={15} />
               </IconButton>

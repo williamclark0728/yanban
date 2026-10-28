@@ -45,6 +45,52 @@ interface Option {
 
 const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 
+// ---------- drafts ----------
+
+/** What was typed but not sent in one chat. */
+interface Draft {
+  text: string;
+  pending: Pending[];
+  quoted: string | null;
+  picked: Skill[];
+}
+
+const drafts = new Map<string, Draft>();
+/** The open composer of each chat, so a file read that finishes after switching back reaches it. */
+const live = new Map<string, (fn: (p: Pending[]) => Pending[]) => void>();
+const SAVED = "yanban.drafts";
+
+/** Text and quotes also survive closing the app; files and picked skills are kept only while it runs. */
+function saved(): Record<string, { text: string; quoted: string | null }> {
+  try {
+    return JSON.parse(localStorage.getItem(SAVED) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function draftOf(key: string): Draft | undefined {
+  const kept = drafts.get(key);
+  if (kept) return kept;
+  const s = saved()[key];
+  return s ? { text: s.text, quoted: s.quoted, pending: [], picked: [] } : undefined;
+}
+
+function keepDraft(key: string, d: Draft) {
+  const empty = !d.text.trim() && !d.pending.length && !d.quoted && !d.picked.length;
+  if (empty) drafts.delete(key);
+  else drafts.set(key, d);
+  const all = saved();
+  if (d.text.trim() || d.quoted) all[key] = { text: d.text, quoted: d.quoted };
+  else if (!(key in all)) return;
+  else delete all[key];
+  try {
+    localStorage.setItem(SAVED, JSON.stringify(all));
+  } catch {
+    /* storage full or blocked: the draft still lasts while the app runs */
+  }
+}
+
 /** The skill's instructions as an attachment, read by the model as "use this skill now". */
 function skillAttachment(s: Skill): Attachment {
   const text = s.dir && isDesktop ? `${s.body}\n\n技能文件夹：${s.dir}（其中的参考文件用 read_skill_file 读取）` : s.body;
@@ -63,6 +109,7 @@ export function Composer({
   workspace,
   onSend,
   onStop,
+  draft,
   ref: handle,
 }: {
   placeholder: string;
@@ -82,18 +129,35 @@ export function Composer({
   /** `queued`: Ctrl+Enter (or the clock button) while busy. */
   onSend: (text: string, attachments: Attachment[], queued?: boolean) => void;
   onStop?: () => void;
+  /** Keeps what is typed but not sent under this key, so it is still there after switching chats. */
+  draft?: string;
   ref?: Ref<ComposerHandle>;
 }) {
-  const [text, setText] = useState("");
-  const [pending, setPending] = useState<Pending[]>([]);
-  const [quoted, setQuoted] = useState<string | null>(null);
-  const [picked, setPicked] = useState<Skill[]>([]);
+  const [initial] = useState(() => (draft ? draftOf(draft) : undefined));
+  const [text, setText] = useState(initial?.text ?? "");
+  const [pending, setPending] = useState<Pending[]>(initial?.pending ?? []);
+  const [quoted, setQuoted] = useState<string | null>(initial?.quoted ?? null);
+  const [picked, setPicked] = useState<Skill[]>(initial?.picked ?? []);
+  const mounted = useRef(true);
   const [hits, setHits] = useState<string[]>([]);
   const [sel, setSel] = useState(0);
   // Esc hides the list until the text changes.
   const [dismissed, setDismissed] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    mounted.current = true;
+    if (draft) live.set(draft, setPending);
+    return () => {
+      mounted.current = false;
+      if (draft && live.get(draft) === setPending) live.delete(draft);
+    };
+  }, [draft]);
+
+  useEffect(() => {
+    if (draft) keepDraft(draft, { text, pending, quoted, picked });
+  }, [draft, text, pending, quoted, picked]);
 
   useEffect(() => {
     const el = ref.current;
@@ -110,9 +174,17 @@ export function Composer({
   const load = (name: string, size: number, read: Promise<Attachment>) => {
     const key = crypto.randomUUID();
     setPending((p) => [...p, { key, name, size, status: "reading" }]);
+    // A file still being read when the user switches chats lands in that chat's draft.
+    const update = (fn: (p: Pending[]) => Pending[]) => {
+      if (mounted.current) return setPending(fn);
+      const open = draft && live.get(draft);
+      if (open) return open(fn);
+      const d = draft && drafts.get(draft);
+      if (d) keepDraft(draft, { ...d, pending: fn(d.pending) });
+    };
     read.then(
-      (file) => setPending((p) => p.map((x) => (x.key === key ? { ...x, status: "ready", file, size: file.size as number } : x))),
-      (e: Error) => setPending((p) => p.map((x) => (x.key === key ? { ...x, status: "error", error: e.message || "读取失败" } : x))),
+      (file) => update((p) => p.map((x) => (x.key === key ? { ...x, status: "ready", file, size: file.size as number } : x))),
+      (e: Error) => update((p) => p.map((x) => (x.key === key ? { ...x, status: "error", error: e.message || "读取失败" } : x))),
     );
   };
 

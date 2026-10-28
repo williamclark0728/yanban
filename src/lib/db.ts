@@ -1,5 +1,5 @@
 import Dexie, { type Table } from "dexie";
-import type { Agent, Group, Message, Provider, Run } from "../types";
+import type { Agent, Chunk, Group, Message, Provider, Run } from "../types";
 import { fromPreset, presets } from "./catalog";
 import { seedAgents, seedGroups, seedMessages } from "./seed";
 
@@ -10,6 +10,7 @@ class YanbanDB extends Dexie {
   messages!: Table<Message, string>;
   runs!: Table<Run, string>;
   kv!: Table<{ key: string; value: unknown }, string>;
+  chunks!: Table<Chunk, string>;
 
   constructor() {
     super("yanban");
@@ -21,6 +22,8 @@ class YanbanDB extends Dexie {
       runs: "id, groupId",
       kv: "key",
     });
+    // 0.6.0: knowledge-base passages.
+    this.version(2).stores({ chunks: "id, lib, doc" });
   }
 }
 

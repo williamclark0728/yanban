@@ -104,7 +104,7 @@ export const usePlanMode = create<Record<string, boolean>>(() => ({}));
 export const setPlanMode = (chat: string, on: boolean) => usePlanMode.setState({ [chat]: on });
 
 /** Tools that only look; plan mode keeps these and drops everything that changes files, sends or installs. */
-const READ_ONLY = new Set(["web_search", "read_page", "list_dir", "read_file", "search_files", "use_skill", "read_skill_file", "ask_user", "update_todos", "remember", "search_chats"]);
+const READ_ONLY = new Set(["web_search", "read_page", "list_dir", "read_file", "search_files", "use_skill", "read_skill_file", "ask_user", "update_todos", "remember", "search_chats", "search_library", "delegate"]);
 
 export const readOnly = (tools: ToolSet): ToolSet => Object.fromEntries(Object.entries(tools).filter(([name]) => READ_ONLY.has(name)));
 
@@ -134,6 +134,8 @@ const MAY_WAIT = new Set([
   "update_todos",
   "remember",
   "search_chats",
+  "search_library",
+  "delegate",
 ]);
 const TIMEOUT_MS = 90_000;
 const REPEAT_LIMIT = 3;

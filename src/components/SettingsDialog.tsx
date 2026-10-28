@@ -1,15 +1,15 @@
 import clsx from "clsx";
-import { Bookmark, BookOpen, ChartColumn, CheckCircle2, ChevronLeft, Download, ExternalLink, Eye, EyeOff, Globe, Loader2, Minus, Plug, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
+import { Bookmark, BookOpen, LibraryBig, ChartColumn, CheckCircle2, ChevronLeft, Download, ExternalLink, Eye, EyeOff, Globe, Loader2, Minus, Plug, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { protocols } from "../lib/catalog";
 import { DESKTOP_DOWNLOAD, DESKTOP_RELEASES, isDesktop } from "../lib/desktop";
 import { describeError, listModels, testProvider } from "../lib/llm";
-import { isReady, resolveModel, stepZoom, TRIAL_ID, useData, usePrefs, useUi, ZOOM_MAX, ZOOM_MIN, type SettingsTab } from "../store";
+import { CHAT_WIDTH_MAX, CHAT_WIDTH_MIN, isReady, resolveModel, stepZoom, TRIAL_ID, useData, usePrefs, useUi, ZOOM_MAX, ZOOM_MIN, type SettingsTab } from "../store";
 import type { Provider, SearchConfig } from "../types";
 import { searchProviders, searchReady, webSearch } from "../lib/search";
 import { seedAgents, seedGroups } from "../lib/seed";
 import { MeAvatar } from "./Avatar";
-import { ConfigRow, McpSettings, MemorySettings, SkillSettings } from "./Extensions";
+import { ConfigRow, LibrarySettings, McpSettings, MemorySettings, SkillSettings } from "./Extensions";
 import { VersionRow } from "./UpdateCard";
 import { UsagePanel } from "./UsagePanel";
 import { ModelPicker } from "./ModelPicker";
@@ -35,6 +35,7 @@ export function SettingsDialog() {
     { value: "search", label: "联网搜索", icon: <Globe size={17} /> },
     { value: "skills", label: "技能", icon: <BookOpen size={17} /> },
     { value: "mcp", label: "MCP", icon: <Plug size={17} /> },
+    { value: "library", label: "知识库", icon: <LibraryBig size={17} /> },
     { value: "memory", label: "记忆", icon: <Bookmark size={17} /> },
     { value: "usage", label: "用量", icon: <ChartColumn size={17} /> },
   ];
@@ -88,6 +89,7 @@ export function SettingsDialog() {
             {settingsTab === "search" && <SearchSettings />}
             {settingsTab === "skills" && <SkillSettings />}
             {settingsTab === "mcp" && <McpSettings />}
+            {settingsTab === "library" && <LibrarySettings />}
             {settingsTab === "memory" && <MemorySettings />}
             {settingsTab === "usage" && <UsagePanel />}
           </div>
@@ -110,7 +112,7 @@ export function Row({ title, desc, children }: { title: string; desc?: string; c
 }
 
 function General() {
-  const { mode, setMode, theme, setTheme, name, setName, approval, setApproval, fontSize, steps, zoom, suggest, set } = usePrefs();
+  const { mode, setMode, theme, setTheme, name, setName, approval, setApproval, fontSize, steps, zoom, suggest, chatWidth, set } = usePrefs();
   const setHelp = useUi((s) => s.setHelp);
   const { agents, groups, restoreExamples } = useData();
   const [restoring, setRestoring] = useState(false);
@@ -163,6 +165,23 @@ function General() {
             { value: "xlarge", label: "特大" },
           ]}
         />
+      </Row>
+      <Row title="对话宽度" desc={chatWidth >= CHAT_WIDTH_MAX ? "铺满窗口，收起侧栏后更宽" : `消息区最宽 ${chatWidth} 像素，拖到最右铺满窗口`}>
+        <div className="flex w-full items-center gap-3 sm:w-64">
+          <input
+            type="range"
+            min={CHAT_WIDTH_MIN}
+            max={CHAT_WIDTH_MAX}
+            step={20}
+            value={chatWidth}
+            onChange={(e) => set({ chatWidth: Number(e.target.value) })}
+            aria-label="对话宽度"
+            className="min-w-0 flex-1 accent-[var(--accent)]"
+          />
+          <button type="button" title="还原到 820 像素" onClick={() => set({ chatWidth: 820 })} className="h-8 shrink-0 rounded-full px-2.5 text-[13px] text-fg-2 hover:bg-hover hover:text-fg">
+            还原
+          </button>
+        </div>
       </Row>
       <Row title="界面缩放" desc={isDesktop ? "整个窗口一起放大缩小；快捷键 Ctrl + 加号 / 减号，Ctrl + 0 还原" : "网页版用浏览器自带的缩放：Ctrl + 加号 / 减号，Ctrl + 0 还原"}>
         {isDesktop ? (

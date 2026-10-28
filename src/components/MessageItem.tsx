@@ -1,6 +1,6 @@
 import clsx from "clsx";
-import { AlertCircle, Archive, BookPlus, Brain, Check, CheckCircle2, ChevronDown, Circle, CircleDot, Copy, CornerDownRight, FileDown, FilePen, ListTodo, Loader2, MessageSquarePlus, Play, RotateCcw, RotateCw, Sparkles, Square, Undo2 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { AlertCircle, Archive, BookPlus, Brain, Check, CheckCircle2, ChevronDown, Circle, CircleDot, Copy, CornerDownRight, FileDown, FilePen, Languages, ListTodo, Loader2, MessageSquarePlus, Play, RotateCcw, RotateCw, Sparkles, Square, Undo2 } from "lucide-react";
+import { useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
@@ -8,6 +8,7 @@ import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import { RUN_PLAN, setPlanMode } from "../lib/agentTools";
 import { retry, useBusy } from "../lib/chat";
+import { looksEnglish, translateReasoning } from "../lib/translate";
 import { send } from "../lib/queue";
 import { undoAll } from "../lib/workmode";
 import { download, replyAsDocx } from "../lib/outputs";
@@ -214,15 +215,44 @@ function Typing() {
   );
 }
 
-function Reasoning({ text, live }: { text: string; live: boolean }) {
+/** The model's thinking, folded; English thinking can be shown in Chinese. */
+function Reasoning({ text, live, messageId, zh }: { text: string; live: boolean; messageId: string; zh?: string }) {
+  const [showZh, setShowZh] = useState(false);
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState("");
+  const box = useRef<HTMLDetailsElement>(null);
+  const canTranslate = !live && looksEnglish(text);
+  const toggle = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    setError("");
+    // Show the text being switched to, even when the box was folded.
+    if (box.current) box.current.open = true;
+    if (zh) return setShowZh((v) => !v);
+    setWorking(true);
+    try {
+      await translateReasoning(messageId);
+      setShowZh(true);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setWorking(false);
+    }
+  };
   return (
-    <details open={live} className="group/r mb-2 rounded-xl bg-active px-3 py-2 text-[13.5px] text-fg-2">
+    <details ref={box} open={live} className="group/r mb-2 rounded-xl bg-active px-3 py-2 text-[13.5px] text-fg-2">
       <summary className="flex cursor-pointer list-none items-center gap-1.5 font-medium select-none">
         <Brain size={14} />
         {live ? "思考中…" : "思考过程"}
         <ChevronDown size={14} className="transition-transform group-open/r:rotate-180" />
+        {canTranslate && (
+          <button type="button" onClick={toggle} disabled={working} className="ml-auto flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium text-accent-text hover:bg-hover disabled:opacity-60">
+            {working ? <Loader2 size={12} className="animate-spin" /> : <Languages size={12} />}
+            {working ? "翻译中" : zh && showZh ? "看原文" : "译成中文"}
+          </button>
+        )}
       </summary>
-      <div className="mt-1.5 whitespace-pre-wrap leading-relaxed">{text}</div>
+      {error && <div className="mt-1 text-[12.5px] text-bad">{error}</div>}
+      <div className="mt-1.5 whitespace-pre-wrap leading-relaxed">{zh && showZh ? zh : text}</div>
     </details>
   );
 }
@@ -481,7 +511,7 @@ export function MessageItem({
   if (mine) {
     return (
       <div className={clsx("group flex justify-end", first ? "mt-4" : "mt-1")}>
-        <div className="flex max-w-[min(620px,85%)] flex-col items-end">
+        <div className="flex max-w-[min(calc(var(--chat-w)*0.76),85%)] flex-col items-end">
           {msg.kind === "text" && msg.via && (
             <span className="mb-1 mr-3 text-[12px] text-fg-3">{agents.find((a) => a.id === msg.via)?.name ?? "主持人"}从私聊转来</span>
           )}
@@ -512,7 +542,7 @@ export function MessageItem({
       {inGroup && (
         <div className="w-8 shrink-0 self-end pb-6">{last && agent && <BotAvatar agent={agent} size={32} />}</div>
       )}
-      <div className={clsx("flex min-w-0 flex-col", column ? "w-full" : "max-w-[min(680px,85%)]")}>
+      <div className={clsx("flex min-w-0 flex-col", column ? "w-full" : "max-w-[min(calc(var(--chat-w)*0.83),85%)]")}>
         {inGroup && first && (
           <span className="mb-1 ml-3 text-[13px] font-medium" style={{ color: agent ? palette[agent.color].text : "var(--text-3)" }}>
             {agent?.name ?? "已删除的成员"}
@@ -520,7 +550,7 @@ export function MessageItem({
         )}
         {hasBody && (
           <div className="rounded-[20px] bg-bubble px-4 py-2.5" data-reply={msg.text && !streaming ? msg.id : undefined}>
-            {reasoning && <Reasoning text={reasoning} live={streaming && !msg.text} />}
+            {reasoning && <Reasoning text={reasoning} live={streaming && !msg.text} messageId={msg.id} zh={msg.kind === "text" ? msg.reasoningZh : undefined} />}
             {msg.kind === "text" && msg.todos?.length ? <Todos todos={msg.todos} /> : null}
             {msg.kind === "text" &&
               msg.steers?.map((s, i) => (

@@ -81,7 +81,14 @@ createServer(async (req, res) => {
     `- temperature=${payload.temperature} max_tokens=${payload.max_tokens ?? payload.max_completion_tokens} reasoning_effort=${payload.reasoning_effort}`;
   // Suggested next steps: "建议" ends the reply with a <next> block when the app asks for one.
   if (system.includes("<next>") && /建议/.test(last)) reply += "\n\n<next>生成 PPT|整理成对比表|派到群里写正式稿</next>";
-  if (system.includes("沉淀成技能")) {
+  // 0.6.0: a sub-agent, the goal check, and translating English reasoning.
+  if (system.includes("子智能体。只做下面这个任务")) {
+    reply = `子任务结果：关于「${last.slice(0, 20)}」的三条要点，出处见 [1]。`;
+  } else if (system.includes("判断一个会话目标")) {
+    reply = /已经进行了 [2-9] 轮/.test(last) ? JSON.stringify({ done: true, left: "" }) : JSON.stringify({ done: false, left: "还差一张对比表" });
+  } else if (system.includes("翻译成通顺的中文")) {
+    reply = "（译文）先确认用户要什么，再分步骤回答。";
+  } else if (system.includes("沉淀成技能")) {
     reply = "```markdown\n---\nname: 实验结果整理\ndescription: 用户要把实验数据整理成结论和表格时使用\n---\n\n# 实验结果整理\n\n1. 先列步骤清单。\n2. 读数据，核对单位。\n3. 写结论，附对比表。\n```";
   } else if (system.includes("你负责审查")) {
     // Reviewer: round 1 finds problems, later rounds pass; a single-agent answer ("待审查稿件") gets two problems.
@@ -151,6 +158,14 @@ createServer(async (req, res) => {
     call = { name: "ask_user", arguments: { question: "报告要用中文还是英文？", options: ["中文", "英文", "中英双语"] } };
   } else if (/重复搜索/.test(last) && tools.includes("web_search") && toolCalls < 4) {
     call = { name: "web_search", arguments: { query: "同一个问题" } };
+  } else if (/查资料库/.test(last) && tools.includes("search_library") && lastMsg?.role !== "tool") {
+    call = { name: "search_library", arguments: { query: last.replace(/查资料库/g, "").trim() || "稀疏 显存" } };
+  } else if (/分头调研/.test(last) && tools.includes("delegate") && lastMsg?.role !== "tool") {
+    call = { name: "delegate", arguments: { task: "调研 A 方向的最新进展，交回三条要点" } };
+  } else if (lastMsg?.role === "tool" && /查资料库/.test(last)) {
+    reply = `资料库里找到：${String(lastMsg.content).slice(0, 80)}`;
+  } else if (lastMsg?.role === "tool" && /分头调研/.test(last)) {
+    reply = `子智能体交回：${String(lastMsg.content).slice(0, 80)}`;
   } else if (/记住/.test(last) && tools.includes("remember") && lastMsg?.role !== "tool") {
     call = { name: "remember", arguments: { text: "武汉大学大三，研究方向是模型压缩" } };
   } else if (/找找之前/.test(last) && tools.includes("search_chats") && lastMsg?.role !== "tool") {
@@ -230,7 +245,7 @@ createServer(async (req, res) => {
     res.write(chunk({}, "tool_calls"));
     return res.end("data: [DONE]\n\n");
   }
-  const thinking = payload.model === "mock-think" ? "先看用户问了什么，再组织回答。" : "";
+  const thinking = payload.model !== "mock-think" ? "" : /英文思考/.test(last) ? "First, figure out what the user is asking for, then answer step by step with the key numbers." : "先看用户问了什么，再组织回答。";
 
   if (!payload.stream) {
     res.writeHead(200, { ...cors, "content-type": "application/json" });

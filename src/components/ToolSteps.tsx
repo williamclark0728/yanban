@@ -3,6 +3,7 @@ import {
   AlertCircle,
   BookOpen,
   Bookmark,
+  Bot,
   ChevronDown,
   Download,
   FilePen,
@@ -12,6 +13,7 @@ import {
   FolderOpen,
   Globe,
   History,
+  LibraryBig,
   Hand,
   ListChecks,
   Loader2,
@@ -47,6 +49,8 @@ const icons = {
   ask_user: MessageCircleQuestion,
   remember: Bookmark,
   search_chats: History,
+  search_library: LibraryBig,
+  delegate: Bot,
 };
 
 const short = (s: string, n = 60) => (s.length > n ? `${s.slice(0, n)}…` : s);
@@ -84,6 +88,10 @@ function verb(t: ToolTrace) {
       return `记住：${short(t.label, 60)}`;
     case "search_chats":
       return `搜索旧对话「${short(t.label, 40)}」`;
+    case "search_library":
+      return `检索资料库「${short(t.label, 40)}」`;
+    case "delegate":
+      return t.status === "running" ? `子任务进行中 · ${short(t.label, 50)}` : `子任务 · ${short(t.label, 50)}`;
   }
 }
 
@@ -284,6 +292,33 @@ function Step({ step: t, messageId }: { step: ToolTrace; messageId: string }) {
           !t.detail && <span className="shrink-0 text-fg-3">· 已删除</span>
         )}
       </div>
+    );
+  }
+
+  // Passages found in the library, or what a sub-agent handed back: folded until clicked.
+  if (t.passages?.length || t.output) {
+    return (
+      <details className="group/s">
+        <summary className={clsx(row, "cursor-pointer list-none select-none")}>
+          {head}
+          <ChevronDown size={14} className="shrink-0 transition-transform group-open/s:rotate-180" />
+        </summary>
+        {t.output ? (
+          <div className="mt-1.5 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl bg-active p-2.5 text-[13px] leading-relaxed text-fg-2">{t.output}</div>
+        ) : (
+          <ol className="mt-1.5 space-y-1.5 rounded-xl bg-active p-2">
+            {t.passages!.map((p, i) => (
+              <li key={i} className="px-1.5 py-0.5 text-[13px]">
+                <div className="flex items-center gap-1.5 font-medium text-fg">
+                  <span className="font-mono text-[11.5px] text-fg-3">{i + 1}</span>
+                  <span className="truncate">{p.title}</span>
+                </div>
+                <div className="line-clamp-3 text-[12.5px] text-fg-3">{p.text}</div>
+              </li>
+            ))}
+          </ol>
+        )}
+      </details>
     );
   }
 
