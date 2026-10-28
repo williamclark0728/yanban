@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { Bookmark, BookOpen, LibraryBig, ChartColumn, CheckCircle2, ChevronLeft, Download, ExternalLink, Eye, EyeOff, Globe, Loader2, Minus, Plug, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
+import { Bookmark, BookOpen, CalendarClock, LibraryBig, ChartColumn, CheckCircle2, ChevronLeft, Download, ExternalLink, Eye, EyeOff, Globe, Loader2, Minus, Plug, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { protocols } from "../lib/catalog";
 import { DESKTOP_DOWNLOAD, DESKTOP_RELEASES, isDesktop } from "../lib/desktop";
@@ -9,7 +9,7 @@ import type { Provider, SearchConfig } from "../types";
 import { searchProviders, searchReady, webSearch } from "../lib/search";
 import { seedAgents, seedGroups } from "../lib/seed";
 import { MeAvatar } from "./Avatar";
-import { ConfigRow, LibrarySettings, McpSettings, MemorySettings, SkillSettings } from "./Extensions";
+import { ConfigRow, LibrarySettings, McpSettings, MemorySettings, ScheduleSettings, SkillSettings } from "./Extensions";
 import { VersionRow } from "./UpdateCard";
 import { UsagePanel } from "./UsagePanel";
 import { ModelPicker } from "./ModelPicker";
@@ -37,6 +37,7 @@ export function SettingsDialog() {
     { value: "mcp", label: "MCP", icon: <Plug size={17} /> },
     { value: "library", label: "知识库", icon: <LibraryBig size={17} /> },
     { value: "memory", label: "记忆", icon: <Bookmark size={17} /> },
+    { value: "schedules", label: "定时任务", icon: <CalendarClock size={17} /> },
     { value: "usage", label: "用量", icon: <ChartColumn size={17} /> },
   ];
 
@@ -91,6 +92,7 @@ export function SettingsDialog() {
             {settingsTab === "mcp" && <McpSettings />}
             {settingsTab === "library" && <LibrarySettings />}
             {settingsTab === "memory" && <MemorySettings />}
+            {settingsTab === "schedules" && <ScheduleSettings />}
             {settingsTab === "usage" && <UsagePanel />}
           </div>
         </section>
@@ -258,7 +260,9 @@ function General() {
               ? "读文件、改文件、运行命令都先问你"
               : approval === "read"
                 ? "读文件和搜索直接做，改文件和运行命令先问你"
-                : "全部直接做；危险命令仍然要你确认两次"
+                : approval === "smart"
+                  ? "读文件直接做；改文件和运行命令先由默认模型审查，在你请求范围内的直接做，可疑的才问你；危险命令仍然要你确认两次"
+                  : "全部直接做；危险命令仍然要你确认两次"
           }
         >
           <Segmented
@@ -267,6 +271,7 @@ function General() {
             options={[
               { value: "ask", label: "每次询问" },
               { value: "read", label: "只读自动" },
+              { value: "smart", label: "智能审批" },
               { value: "full", label: "完全权限" },
             ]}
           />

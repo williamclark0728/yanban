@@ -2,9 +2,10 @@
 // Each action goes through the approval level the user chose; dangerous commands always ask, twice.
 import { jsonSchema, tool, type ToolSet } from "ai";
 import { create } from "zustand";
-import { useData, usePrefs } from "../store";
-import type { Agent, LocalTool, ToolTrace } from "../types";
+import { resolveModel, useData, usePrefs } from "../store";
+import type { Agent, LocalTool, TextMessage, ToolTrace } from "../types";
 import { call, isDesktop } from "./desktop";
+import { completeText } from "./llm";
 import { diffLines, diffStats } from "./diff";
 import type { Report } from "./tools";
 
@@ -42,11 +43,62 @@ export function danger(command: string) {
   return DANGER.find(([re]) => re.test(command))?.[1];
 }
 
+const REVIEW_RULES = [
+  "你是安全审查员。智能体正在用户电脑的一个工作文件夹里操作，下面是它要做的一步。判断这一步能不能不问用户直接执行：",
+  "- 可以放行：在用户请求的范围内，只改工作区里和任务有关的文件，命令只是查看、编译、运行测试或脚本。",
+  "- 要问用户：删除或覆盖大量内容、改和任务无关的文件、联网下载并执行、安装软件、改系统设置、看不懂在做什么。",
+  '只输出一个 JSON 对象：{"safe": true 或 false, "reason": "一句话理由"}',
+].join("\n");
+
+/**
+ * Smart approval: another model call decides whether a change fits the user's request.
+ * Returns the reviewer's verdict, or null when it couldn't decide (then the user is asked).
+ */
+async function review(ask: NonNullable<ToolTrace["ask"]>, signal?: AbortSignal): Promise<{ safe: boolean; reason: string } | null> {
+  const { messages, providers, defaultModel } = useData.getState();
+  const target = resolveModel(undefined, providers, defaultModel);
+  if (!target) return null;
+  const request = messages.findLast((m): m is TextMessage => m.kind === "text" && m.sender === "me")?.text ?? "";
+  const changed = (ask.diff ?? [])
+    .filter((l) => l.type !== "same")
+    .map((l) => `${l.type === "add" ? "+" : l.type === "del" ? "-" : "…"} ${l.text}`)
+    .join("\n")
+    .slice(0, 4000);
+  try {
+    const r = await completeText({
+      provider: target.provider,
+      modelId: target.modelId,
+      system: REVIEW_RULES,
+      messages: [{ role: "user", content: `用户最近的请求：${request.slice(0, 2000) || "（没有）"}\n\n要执行的操作：${ask.what}${changed ? `\n\n改动：\n${changed}` : ""}` }],
+      params: { temperature: 0, topP: 1, maxTokens: 0, history: 0, effort: target.provider.protocol === "openai-chat" ? "off" : "auto" },
+      signal: signal ?? new AbortController().signal,
+    });
+    const text = r.text.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/```(?:json)?/gi, "");
+    const data = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
+    return { safe: data.safe === true || data.safe === "true", reason: String(data.reason ?? "").trim() };
+  } catch {
+    return null;
+  }
+}
+
 /** Asks the user unless the approval level lets this kind of action through. */
 export async function approve(report: Report, step: ToolTrace, kind: "read" | "change", ask: NonNullable<ToolTrace["ask"]>, signal?: AbortSignal) {
   const level = usePrefs.getState().approval;
   const needed = !!ask.danger || level === "ask" || (kind === "change" && level !== "full");
   if (!needed) return true;
+  // Smart approval: a reviewer model lets safe changes through; dangerous commands always come to the user.
+  if (level === "smart" && !ask.danger) {
+    report({ ...step, status: "running", detail: "智能审批中" });
+    const verdict = await review(ask, signal);
+    if (signal?.aborted) return false;
+    if (verdict?.safe) {
+      // Callers keep reporting from this step object, so the note stays on the step.
+      step.auto = verdict.reason || "在请求范围内";
+      report({ ...step, status: "running", detail: undefined });
+      return true;
+    }
+    ask = { ...ask, review: verdict ? verdict.reason || "审查认为需要你确认" : "智能审批没有给出结论" };
+  }
   report({ ...step, status: "waiting", ask });
   const ok = await new Promise<boolean>((resolve) => {
     usePending.setState({ [step.id]: resolve });
@@ -123,7 +175,7 @@ interface Output {
 export function workTools(agent: Agent, report: Report): ToolSet {
   if (!hasWorkspace(agent)) return {};
   const root = agent.workspace!;
-  const step = (id: string, name: LocalTool, label: string): ToolTrace => ({ id, name, label, status: "running" });
+  const step = (id: string, name: LocalTool, label: string): ToolTrace => ({ id, name, label, status: "running", root });
   const fail = (s: ToolTrace, e: unknown) => {
     const message = (e as Error).message;
     report({ ...s, status: "error", detail: message });

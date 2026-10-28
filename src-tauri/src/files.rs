@@ -19,6 +19,16 @@ pub fn reveal(path: String) -> Result<(), String> {
         .map_err(|e| format!("打不开资源管理器：{e}"))
 }
 
+/// Opens a file with its default program (Word for .docx, the PDF viewer for .pdf…).
+#[tauri::command]
+pub fn open_file(path: String) -> Result<(), String> {
+    let path = path.replace('/', "\\");
+    if !Path::new(&path).is_file() {
+        return Err(format!("找不到 {path}"));
+    }
+    std::process::Command::new("explorer").arg(&path).spawn().map(|_| ()).map_err(|e| format!("打不开：{e}"))
+}
+
 fn walk(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.filter_map(|e| e.ok()) {

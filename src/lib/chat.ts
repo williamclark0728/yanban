@@ -5,7 +5,7 @@ import type { Agent, Attachment, Group, Issue, Message, ModelRef, TextMessage } 
 import { AUTO_COMPACT, contextWindow, estimateTokens, sinceSummary, SUMMARY_PROMPT, TOOL_OVERHEAD } from "./context";
 import { attachmentText, hasImages } from "./files";
 import { dispatchRules, dispatchTools } from "./collab";
-import { isDesktop } from "./desktop";
+import { call, isDesktop } from "./desktop";
 import { describeError, streamReply } from "./llm";
 import { mcpTools } from "./mcp";
 import { FILE_RULES, fileTools, filesText } from "./outputs";
@@ -18,6 +18,9 @@ import { MEMORY_RULES, memoryLines, memoryTools } from "./memory";
 import { libraryRules, libraryTools } from "./library";
 import { DELEGATE_RULES, delegateTool } from "./subagent";
 import { afterReply, goalRules } from "./goal";
+import { docRules, docTools } from "./docs";
+import { jobRules, jobTools } from "./jobs";
+import { scheduleRules, scheduleTool } from "./schedule";
 import { NATIVE_WEB_RULES, NO_WEB_RULES, tracer, WEB_RULES, webAccess, webPlan, type Report } from "./tools";
 
 /** Chats with work in flight. One run per chat; stopping a chat aborts all of its replies. */
@@ -246,6 +249,9 @@ export async function speak(opts: {
     ...askTool(report),
     ...memoryTools(report, agent, id),
     ...libraryTools(report),
+    ...docTools(opts.chat, report),
+    ...jobTools(agent, report),
+    ...scheduleTool(opts.chat, report),
     ...fileTools(id, report, agent),
     ...skillTools(report, agent),
     ...workTools(agent, report),
@@ -254,6 +260,19 @@ export async function speak(opts: {
   };
   const tools = guard(opts.plan ? readOnly(all) : all, { agent: agent, settle });
   const work = await workRules(agent);
+
+  // Work mode: after the reply, list what it left in the workspace, so the files are a click away.
+  const started = Date.now();
+  const collect = async () => {
+    if (!isDesktop || !agent.workspace) return;
+    try {
+      const found = await call<{ path: string; size: number }[]>("ws_recent", { root: agent.workspace, sinceMs: started - 1000 });
+      const files = found.filter((f) => !f.path.startsWith(".yanban/")).map(({ path, size }) => ({ path, size }));
+      if (files.length) patchMessage(id, { outputs: { root: agent.workspace, files } }, true);
+    } catch {
+      /* the folder may be gone; the reply stands without the list */
+    }
+  };
 
   let text = "";
   let reasoning = "";
@@ -275,7 +294,7 @@ export async function speak(opts: {
     const r = await streamReply({
       provider: target.provider,
       modelId: target.modelId,
-      system: [opts.system, FILE_RULES, skillRules(), work, AGENT_RULES, MEMORY_RULES, libraryRules(), opts.plan && PLAN_RULES, opts.suggest && usePrefs.getState().suggest && NEXT_RULES]
+      system: [opts.system, FILE_RULES, skillRules(), work, jobRules(agent), AGENT_RULES, MEMORY_RULES, libraryRules(), scheduleRules(opts.chat), docRules(opts.chat), opts.plan && PLAN_RULES, opts.suggest && usePrefs.getState().suggest && NEXT_RULES]
         .filter(Boolean)
         .join("\n\n"),
       messages: opts.messages,
@@ -316,6 +335,7 @@ export async function speak(opts: {
       },
       true,
     );
+    await collect();
     return { ok: true, text: final.text, tokens: r.input + r.output, messageId: id };
   } catch (e) {
     done = true;
@@ -328,6 +348,7 @@ export async function speak(opts: {
       if (sendsImages(opts.messages) && /请求被拒绝|找不到/.test(error.message)) error.message = "这个模型可能不支持图片，换一个能识图的模型试试";
       patchMessage(id, { text, reasoning: reasoning.trim() ? reasoning : undefined, status: "error", error }, true);
     }
+    await collect();
     return { ok: false, text, tokens: 0, messageId: id };
   }
 }

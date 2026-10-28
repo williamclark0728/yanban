@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { ChevronDown, ChevronLeft, ChevronUp, ClipboardList, Clock, CornerDownRight, FileUp, Lightbulb, PanelRight, Pencil, PlugZap, Quote, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronUp, ClipboardList, Clock, CornerDownRight, FileUp, Lightbulb, NotebookPen, PanelRight, Pencil, PlugZap, Quote, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { setPlanMode, usePlanMode } from "../lib/agentTools";
 import { compact, newTopic, stop, useBusy } from "../lib/chat";
@@ -12,6 +12,8 @@ import type { Attachment, Message, TextMessage } from "../types";
 import { BotAvatar, GroupAvatar } from "./Avatar";
 import { CompareChip, CompareRow } from "./Compare";
 import { GoalBar } from "./Goal";
+import { JobsBar } from "./Jobs";
+import { openDoc } from "../lib/docs";
 import { Composer, type Command, type ComposerHandle } from "./Composer";
 import { ContextMeter, EffortChip } from "./ContextMeter";
 import { MessageItem } from "./MessageItem";
@@ -200,6 +202,7 @@ export function ChatView() {
           { name: "web", label: agent.web ? "关闭联网" : "打开联网", hint: `现在${agent.web ? "开着" : "关着"}`, run: () => updateAgent(agent.id, { web: !agent.web }) },
         ]
       : []),
+    { name: "doc", label: "共写文档", hint: "在侧栏写一份文档，可以让 AI 改写选中的段落", run: () => openDoc(chatId) },
     { name: "export", label: "导出对话", hint: "存成 Markdown 文件", run: () => exportChat(chatId) },
     { name: "help", label: "快捷键和命令", run: () => setHelp(true) },
   ];
@@ -239,9 +242,11 @@ export function ChatView() {
         </div>
       )}
       <header className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-20 items-start justify-between bg-gradient-to-b from-bg from-40% to-transparent px-3 pt-3">
-        <IconButton aria-label="返回" onClick={back} className="pointer-events-auto md:invisible">
-          <ChevronLeft size={22} />
-        </IconButton>
+        <div className="flex w-[72px]">
+          <IconButton aria-label="返回" onClick={back} className="pointer-events-auto md:invisible">
+            <ChevronLeft size={22} />
+          </IconButton>
+        </div>
         <button
           type="button"
           onClick={() => togglePanel(true)}
@@ -252,9 +257,14 @@ export function ChatView() {
           {group && <span className="shrink-0 text-sm text-fg-3">{members.length + 1} 人</span>}
           {agent && dev && target && <span className="truncate font-mono text-xs text-fg-3">{target.modelId}</span>}
         </button>
-        <IconButton aria-label={panelOpen ? "收起详情" : "展开详情"} onClick={() => togglePanel()} className="pointer-events-auto">
-          <PanelRight size={19} />
-        </IconButton>
+        <div className="pointer-events-auto flex">
+          <IconButton aria-label="共写文档" title="共写文档（/doc）" onClick={() => openDoc(chatId)}>
+            <NotebookPen size={18} />
+          </IconButton>
+          <IconButton aria-label={panelOpen ? "收起详情" : "展开详情"} onClick={() => togglePanel()}>
+            <PanelRight size={19} />
+          </IconButton>
+        </div>
       </header>
 
       <div
@@ -326,6 +336,7 @@ export function ChatView() {
           </button>
         )}
         {group && <TaskBoard group={group.id} />}
+        {isDesktop && (agent?.workspace ?? group?.workspace) && <JobsBar root={(agent?.workspace ?? group?.workspace)!} />}
         {agent && <GoalBar chat={agent.id} editing={goalEdit} onClose={() => setGoalEdit(false)} send={(t) => sendNowOrInsert(agent.id, t)} />}
         {inserted && inserted.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5 px-1">

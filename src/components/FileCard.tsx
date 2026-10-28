@@ -1,8 +1,21 @@
 import { BookOpen, FileArchive, FileCode2, FileImage, FileSpreadsheet, FileText, FileType2, Presentation, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { formatSize } from "../lib/files";
+import { useUi } from "../store";
 import type { Attachment } from "../types";
 import { IconButton } from "./ui";
+
+/** The attachment kind a file name suggests, for its icon. */
+export function kindOf(name: string): Attachment["kind"] {
+  const e = name.split(".").pop()?.toLowerCase() ?? "";
+  if (e === "pdf") return "pdf";
+  if (e === "docx" || e === "doc") return "docx";
+  if (/^(png|jpe?g|gif|webp|bmp|svg)$/.test(e)) return "image";
+  if (/^(xlsx|xls|csv)$/.test(e)) return "sheet";
+  if (e === "pptx" || e === "ppt") return "slides";
+  if (e === "zip") return "zip";
+  return "text";
+}
 
 export function FileIcon({ kind }: { kind?: Attachment["kind"] }) {
   if (kind === "pdf") return <FileType2 size={16} />;
@@ -39,7 +52,8 @@ export function FileCard({ file }: { file: Attachment }) {
       <button
         type="button"
         disabled={!previewable}
-        onClick={() => setOpen(true)}
+        // Documents open in the side panel, so the chat stays visible next to them.
+        onClick={() => useUi.getState().openPane({ kind: "attachment", file })}
         className="mb-1.5 flex max-w-[280px] items-center gap-2.5 rounded-2xl bg-bubble px-3 py-2 text-left enabled:hover:bg-raise-2"
       >
         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-text">

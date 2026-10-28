@@ -10,7 +10,7 @@ const MAX_OUTPUT: usize = 30_000;
 
 /// Resolves `rel` against the workspace root and refuses anything that ends up outside it,
 /// including through `..` or a symbolic link.
-fn inside(root: &str, rel: &str) -> Result<PathBuf, String> {
+pub(crate) fn inside(root: &str, rel: &str) -> Result<PathBuf, String> {
     let root = dunce::canonicalize(root).map_err(|e| format!("工作区文件夹打不开：{e}"))?;
     let rel = rel.trim();
     let joined = if Path::new(rel).is_absolute() { PathBuf::from(rel) } else { root.join(rel) };
@@ -161,6 +161,50 @@ pub async fn ws_files(root: String, query: String) -> Result<Vec<String>, String
         }
         found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.len().cmp(&b.1.len())).then_with(|| a.1.cmp(&b.1)));
         Ok(found.into_iter().take(30).map(|(_, rel)| rel).collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize)]
+pub struct Recent {
+    path: String,
+    size: u64,
+    modified: u64,
+}
+
+/// Files created or changed since `since_ms` (Unix milliseconds), newest first: what a reply produced,
+/// including files its commands and scripts wrote. Ignore files are not applied, since outputs are often
+/// ignored by git; hidden folders, dependencies and caches are skipped.
+#[tauri::command]
+pub async fn ws_recent(root: String, since_ms: u64) -> Result<Vec<Recent>, String> {
+    let base = dunce::canonicalize(&root).map_err(|e| format!("工作区文件夹打不开：{e}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let skip = ["node_modules", "__pycache__", "target", "dist", "build", ".venv", "venv"];
+        let walk = ignore::WalkBuilder::new(&base)
+            .standard_filters(false)
+            .hidden(true)
+            .filter_entry(move |e| !(e.file_type().is_some_and(|t| t.is_dir()) && skip.iter().any(|s| e.file_name().eq_ignore_ascii_case(s))))
+            .build();
+        let mut found: Vec<Recent> = Vec::new();
+        for entry in walk.filter_map(|e| e.ok()).take(50_000) {
+            if !entry.file_type().is_some_and(|t| t.is_file()) {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            if modified >= since_ms {
+                found.push(Recent { path: relative(&base, entry.path()), size: meta.len(), modified });
+            }
+        }
+        found.sort_by(|a, b| b.modified.cmp(&a.modified));
+        found.truncate(30);
+        Ok(found)
     })
     .await
     .map_err(|e| e.to_string())?

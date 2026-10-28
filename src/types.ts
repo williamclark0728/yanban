@@ -149,6 +149,8 @@ export type TextMessage = Base & {
   /** In a comparison: the model that wrote this one, and whether the user picked it to carry on. */
   model?: string;
   chosen?: boolean;
+  /** Desktop work mode: files in the workspace this reply created or changed, including ones its commands wrote. */
+  outputs?: { root: string; files: { path: string; size: number }[] };
   /** The reasoning translated into Chinese, when the model thought in English. */
   reasoningZh?: string;
   /** What the user will likely want next, offered as buttons under the reply. */
@@ -209,13 +211,17 @@ export interface Source {
 
 export interface ToolTrace {
   id: string;
-  name: "web_search" | "read_page" | "dispatch_to_group" | "make_file" | "use_skill" | "install_skill" | "mcp" | "ask_user" | "remember" | "search_chats" | "search_library" | "delegate" | LocalTool;
+  name: "web_search" | "read_page" | "dispatch_to_group" | "make_file" | "use_skill" | "install_skill" | "mcp" | "ask_user" | "remember" | "search_chats" | "search_library" | "delegate" | "schedule_task" | "edit_doc" | LocalTool;
   /** One line for the UI, e.g. the search query or the group name. */
   label: string;
   /** "waiting": a local action waits for the user's approval. */
   status: "running" | "waiting" | "done" | "error";
-  /** What the user is asked to approve. */
-  ask?: { what: string; diff?: DiffLine[]; danger?: string };
+  /** What the user is asked to approve; `review` is why smart approval passed it on to the user. */
+  ask?: { what: string; diff?: DiffLine[]; danger?: string; review?: string };
+  /** Smart approval let this through without asking; the reviewer's reason. */
+  auto?: string;
+  /** Desktop work mode: the workspace a file step happened in, so the file can be previewed. */
+  root?: string;
   /** How to undo a file change: the file's earlier content, or null when the change created it. */
   undo?: { root: string; path: string; before: string | null; undone?: boolean };
   detail?: string;
@@ -285,7 +291,30 @@ export interface McpServer {
   enabled: boolean;
 }
 
-export type LocalTool = "list_dir" | "read_file" | "search_files" | "write_file" | "edit_file" | "run_command";
+export type LocalTool = "list_dir" | "read_file" | "search_files" | "write_file" | "edit_file" | "run_command" | "start_job" | "job_output" | "stop_job";
+
+/** A message sent to an agent at set times (Settings → 定时任务). */
+export interface Schedule {
+  id: string;
+  agentId: string;
+  prompt: string;
+  /** "HH:MM", local time. */
+  time: string;
+  repeat: "daily" | "weekdays" | "once";
+  /** For "once": the day, "YYYY-MM-DD". */
+  date?: string;
+  enabled: boolean;
+  createdAt: number;
+  lastRun?: number;
+}
+
+/** A draft the user and the agent write together, one per chat, in the side panel. */
+export interface Doc {
+  chat: string;
+  title: string;
+  text: string;
+  updatedAt: number;
+}
 
 /** One line of a change preview; "gap" stands for unchanged lines left out. */
 export interface DiffLine {

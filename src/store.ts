@@ -4,14 +4,14 @@ import { presets, fromPreset } from "./lib/catalog";
 import { addExamples, db, ensureSeeded, getKv, setKv } from "./lib/db";
 import { isDesktop } from "./lib/desktop";
 import { loadUsage } from "./lib/usage";
-import type { Agent, ChatRef, Group, Library, McpServer, Memory, Message, ModelParams, ModelRef, Provider, Run, SearchConfig, Skill, TeamTemplate } from "./types";
+import type { Agent, Attachment, ChatRef, Doc, Group, Library, Schedule, McpServer, Memory, Message, ModelParams, ModelRef, Provider, Run, SearchConfig, Skill, TeamTemplate } from "./types";
 
 export type Theme = "dark" | "light" | "system";
 export type PanelTab = "info" | "members" | "runs" | "memory";
-export type SettingsTab = "general" | "providers" | "search" | "skills" | "mcp" | "library" | "memory" | "usage";
+export type SettingsTab = "general" | "providers" | "search" | "skills" | "mcp" | "library" | "memory" | "schedules" | "usage";
 
 /** Desktop work mode: which local actions need the user's OK. Dangerous commands always do. */
-export type Approval = "ask" | "read" | "full";
+export type Approval = "ask" | "read" | "smart" | "full";
 
 export type FontSize = "small" | "medium" | "large" | "xlarge";
 
@@ -86,9 +86,18 @@ export interface Aside {
   key: string;
 }
 
+/** What the right-hand panel shows besides the details: a file, or the chat's shared document. */
+export type Pane =
+  | { kind: "file"; root: string; path: string; key: string }
+  | { kind: "attachment"; file: Attachment; key: string }
+  | { kind: "doc"; chat: string; key: string };
+
 interface Ui {
   active: ChatRef | null;
   aside: Aside | null;
+  pane: Pane | null;
+  openPane: (pane: DistributiveOmit<Pane, "key">) => void;
+  closePane: () => void;
   /** A composer popover opened from a slash command. */
   chip: "model" | "effort" | "compare" | null;
   helpOpen: boolean;
@@ -124,9 +133,15 @@ interface Ui {
   quoteInto: (text: string | null) => void;
 }
 
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
 export const useUi = create<Ui>()((set) => ({
   active: { kind: "agent", id: "helper" },
   aside: null,
+  pane: null,
+  // One side panel at a time: opening a file or the document closes the explain chat, and the other way round.
+  openPane: (pane) => set({ pane: { ...pane, key: crypto.randomUUID() } as Pane, aside: null }),
+  closePane: () => set({ pane: null }),
   chip: null,
   helpOpen: false,
   focus: null,
@@ -148,7 +163,7 @@ export const useUi = create<Ui>()((set) => ({
   setEditProvider: (editProvider) => set({ editProvider }),
   closeSettings: () => set({ settingsOpen: false }),
   setSearch: (search) => set({ search }),
-  openAside: (aside) => set({ aside: { ...aside, key: crypto.randomUUID() } }),
+  openAside: (aside) => set({ aside: { ...aside, key: crypto.randomUUID() }, pane: null }),
   closeAside: () => set({ aside: null }),
   setChip: (chip) => set({ chip }),
   setHelp: (helpOpen) => set({ helpOpen }),
@@ -184,6 +199,13 @@ interface Data {
   /** Knowledge bases; their passages are in the chunks table. */
   libraries: Library[];
   setLibraries: (libraries: Library[]) => void;
+  /** Shared documents, one per chat. */
+  docs: Doc[];
+  saveDoc: (doc: Doc) => void;
+  /** Messages sent to agents at set times. */
+  schedules: Schedule[];
+  setSchedules: (schedules: Schedule[]) => void;
+  deleteDoc: (chat: string) => void;
   /** The site's own web search, when the server offers it. */
   siteSearch: { limit: number; remaining: number } | null;
   refreshSiteSearch: () => Promise<void>;
@@ -254,10 +276,12 @@ export const useData = create<Data>()((set, get) => ({
   mcpServers: [],
   memories: [],
   libraries: [],
+  docs: [],
+  schedules: [],
 
   load: async () => {
     await ensureSeeded();
-    const [stored, groups, messages, runs, providers, defaultModel, search, templates, skills, mcpServers, uncapped, memories, libraries] = await Promise.all([
+    const [stored, groups, messages, runs, providers, defaultModel, search, templates, skills, mcpServers, uncapped, memories, libraries, docs, schedules] = await Promise.all([
       db.agents.toArray(),
       db.groups.toArray(),
       db.messages.orderBy("at").toArray(),
@@ -271,6 +295,8 @@ export const useData = create<Data>()((set, get) => ({
       getKv("uncapped", false),
       getKv<Memory[]>("memories", []),
       getKv<Library[]>("libraries", []),
+      getKv<Doc[]>("docs", []),
+      getKv<Schedule[]>("schedules", []),
     ]);
     // Replies used to stop at 2048 tokens by default, which cut long files short. That default now means no cap.
     const agents = uncapped ? stored : stored.map((a) => (a.params.maxTokens === 2048 ? { ...a, params: { ...a.params, maxTokens: 0 } } : a));
@@ -286,7 +312,7 @@ export const useData = create<Data>()((set, get) => ({
         : m,
     );
     const trial = get().trial;
-    set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(trial ? [...providers, trialProvider(trial)] : providers), defaultModel, search, templates, skills, mcpServers, memories, libraries });
+    set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(trial ? [...providers, trialProvider(trial)] : providers), defaultModel, search, templates, skills, mcpServers, memories, libraries, docs, schedules });
     void get().refreshTrial();
     void get().refreshSiteSearch();
   },
@@ -341,6 +367,23 @@ export const useData = create<Data>()((set, get) => ({
   setMcpServers: (mcpServers) => {
     set({ mcpServers });
     void setKv("mcpServers", mcpServers);
+  },
+
+  setSchedules: (schedules) => {
+    set({ schedules });
+    void setKv("schedules", schedules);
+  },
+
+  saveDoc: (doc) => {
+    const docs = [...get().docs.filter((d) => d.chat !== doc.chat), doc];
+    set({ docs });
+    void setKv("docs", docs);
+  },
+
+  deleteDoc: (chat) => {
+    const docs = get().docs.filter((d) => d.chat !== chat);
+    set({ docs });
+    void setKv("docs", docs);
   },
 
   setLibraries: (libraries) => {

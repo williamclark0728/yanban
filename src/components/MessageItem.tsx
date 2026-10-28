@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { AlertCircle, Archive, BookPlus, Brain, Check, CheckCircle2, ChevronDown, Circle, CircleDot, Copy, CornerDownRight, FileDown, FilePen, Languages, ListTodo, Loader2, MessageSquarePlus, Play, RotateCcw, RotateCw, Sparkles, Square, Undo2 } from "lucide-react";
+import { AlertCircle, Archive, BookPlus, Brain, Check, CheckCircle2, ChevronDown, Circle, CircleDot, Copy, CornerDownRight, ExternalLink, FileDown, FilePen, FolderOpen, Languages, ListTodo, NotebookPen, Loader2, MessageSquarePlus, Play, RotateCcw, RotateCw, Sparkles, Square, Undo2 } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -8,6 +8,9 @@ import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import { RUN_PLAN, setPlanMode } from "../lib/agentTools";
 import { retry, useBusy } from "../lib/chat";
+import { call } from "../lib/desktop";
+import { openDoc } from "../lib/docs";
+import { formatSize } from "../lib/files";
 import { looksEnglish, translateReasoning } from "../lib/translate";
 import { send } from "../lib/queue";
 import { undoAll } from "../lib/workmode";
@@ -16,10 +19,11 @@ import { clock } from "../lib/time";
 import { useData, usePrefs, useUi } from "../store";
 import type { Agent, Issue, Message, Todo, ToolTrace, Usage, Verdict } from "../types";
 import { BotAvatar, palette } from "./Avatar";
-import { FileCard } from "./FileCard";
+import { FileCard, FileIcon, kindOf } from "./FileCard";
 import { MadeFiles } from "./MadeFiles";
 import { SaveSkill } from "./SaveSkill";
 import { citations, ToolSteps } from "./ToolSteps";
+import { IconButton } from "./ui";
 
 function withMentions(text: string, agents: Agent[]) {
   const me = usePrefs.getState().name.trim();
@@ -318,6 +322,51 @@ function Todos({ todos }: { todos: Todo[] }) {
   );
 }
 
+const absPath = (root: string, path: string) => `${root.replace(/[\\/]+$/, "")}\\${path.replace(/\//g, "\\")}`;
+
+/** Files the reply left in the workspace, its scripts' outputs included: preview, open, or show in the folder. */
+function OutputFiles({ outputs }: { outputs: NonNullable<Extract<Message, { kind: "text" }>["outputs"]> }) {
+  const openPane = useUi((s) => s.openPane);
+  const [error, setError] = useState("");
+  const { root, files } = outputs;
+  return (
+    <div className="mt-1.5 rounded-2xl border border-line bg-raise px-2 py-2 text-[13px]">
+      <div className="flex items-center gap-2 px-1.5 pb-1 font-medium">
+        <FolderOpen size={14} className="shrink-0 text-fg-2" />
+        这次生成或改动的文件（{files.length}）
+      </div>
+      <ul>
+        {files.map((f) => (
+          <li key={f.path} className="group/f flex items-center gap-2 rounded-xl px-1.5 py-1 hover:bg-hover">
+            <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-text">
+              <FileIcon kind={kindOf(f.path)} />
+            </span>
+            <button type="button" onClick={() => openPane({ kind: "file", root, path: f.path })} title="在侧栏查看" className="min-w-0 flex-1 text-left">
+              <span className="block truncate font-medium">{f.path.split("/").pop()}</span>
+              <span className="block truncate text-[12px] text-fg-3">
+                {f.path.includes("/") ? `${f.path.slice(0, f.path.lastIndexOf("/"))} · ` : ""}
+                {formatSize(f.size)}
+              </span>
+            </button>
+            <button
+              type="button"
+              title="用默认程序打开"
+              onClick={() => void call("open_file", { path: absPath(root, f.path) }).catch((e: Error) => setError(e.message))}
+              className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-[12.5px] font-medium text-accent-text hover:bg-active"
+            >
+              <ExternalLink size={13} /> 打开
+            </button>
+            <IconButton aria-label="在文件夹中显示" title="在文件夹中显示" className="size-7" onClick={() => void call("reveal", { path: absPath(root, f.path) })}>
+              <FolderOpen size={14} />
+            </IconButton>
+          </li>
+        ))}
+      </ul>
+      {error && <div className="px-1.5 text-bad">{error}</div>}
+    </div>
+  );
+}
+
 /** Every file this reply changed, with one button to put them all back. */
 function Changes({ messageId, tools }: { messageId: string; tools: ToolTrace[] }) {
   const changed = tools.filter((t) => t.undo);
@@ -354,7 +403,15 @@ function Changes({ messageId, tools }: { messageId: string; tools: ToolTrace[] }
           const last = changed.findLast((t) => t.undo!.path === f)!;
           return (
             <li key={f} className={clsx("truncate font-mono text-[12.5px]", last.undo!.undone && "text-fg-3 line-through")}>
-              {f} <span className="font-sans text-fg-3">{last.detail}</span>
+              <button
+                type="button"
+                title="在侧栏查看"
+                onClick={() => useUi.getState().openPane({ kind: "file", root: last.undo!.root, path: f })}
+                className="underline decoration-line-2 underline-offset-2 hover:text-fg"
+              >
+                {f}
+              </button>{" "}
+              <span className="font-sans text-fg-3">{last.detail}</span>
             </li>
           );
         })}
@@ -569,6 +626,7 @@ export function MessageItem({
           </div>
         )}
         {msg.kind === "text" && msg.files?.length ? <MadeFiles files={msg.files} /> : null}
+        {msg.kind === "text" && msg.outputs?.files.length && !streaming ? <OutputFiles outputs={msg.outputs} /> : null}
         {tools && !streaming && <Changes messageId={msg.id} tools={tools} />}
         {msg.kind === "text" && msg.plan && !streaming && !failed && isLatest && <RunPlan chat={msg.chat} />}
         {msg.kind === "text" && !inGroup && !column && !streaming && !failed && isLatest && <NextSteps msg={msg} />}
@@ -582,11 +640,18 @@ export function MessageItem({
             name={msg.kind === "text" ? (agent?.name ?? "回复") : undefined}
             align="left"
             extra={
-              msg.kind === "text" && !inGroup && !isLatest && !failed && complex(msg) ? (
-                <SkillButton messageId={msg.id} className="flex items-center gap-1 hover:text-fg">
-                  <BookPlus size={12} /> 存成技能
-                </SkillButton>
-              ) : undefined
+              <>
+                {msg.kind === "text" && msg.text && !failed && (
+                  <button type="button" title="把这条回复放进共写文档，在侧栏接着改" onClick={() => openDoc(msg.chat, msg.text)} className="flex items-center gap-1 hover:text-fg">
+                    <NotebookPen size={12} /> 放进文档
+                  </button>
+                )}
+                {msg.kind === "text" && !inGroup && !isLatest && !failed && complex(msg) && (
+                  <SkillButton messageId={msg.id} className="flex items-center gap-1 hover:text-fg">
+                    <BookPlus size={12} /> 存成技能
+                  </SkillButton>
+                )}
+              </>
             }
           />
         )}

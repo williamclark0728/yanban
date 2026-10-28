@@ -4,6 +4,8 @@ import {
   BookOpen,
   Bookmark,
   Bot,
+  CalendarClock,
+  CircleStop,
   ChevronDown,
   Download,
   FilePen,
@@ -14,6 +16,9 @@ import {
   Globe,
   History,
   LibraryBig,
+  NotebookPen,
+  Play,
+  ScrollText,
   Hand,
   ListChecks,
   Loader2,
@@ -21,6 +26,7 @@ import {
   Plug,
   Search,
   ShieldAlert,
+  ShieldCheck,
   SquareTerminal,
   Undo2,
   Users,
@@ -51,7 +57,15 @@ const icons = {
   search_chats: History,
   search_library: LibraryBig,
   delegate: Bot,
+  schedule_task: CalendarClock,
+  edit_doc: NotebookPen,
+  start_job: Play,
+  job_output: ScrollText,
+  stop_job: CircleStop,
 };
+
+/** Steps about one file in the workspace; its name opens the file in the side panel. */
+const FILE_STEPS = new Set(["read_file", "write_file", "edit_file"]);
 
 const short = (s: string, n = 60) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
@@ -92,6 +106,16 @@ function verb(t: ToolTrace) {
       return `检索资料库「${short(t.label, 40)}」`;
     case "delegate":
       return t.status === "running" ? `子任务进行中 · ${short(t.label, 50)}` : `子任务 · ${short(t.label, 50)}`;
+    case "schedule_task":
+      return `建定时任务：${short(t.label, 60)}`;
+    case "edit_doc":
+      return `改共写文档：${t.label}`;
+    case "start_job":
+      return `后台运行 ${short(t.label)}`;
+    case "job_output":
+      return `查看后台任务 ${t.label}`;
+    case "stop_job":
+      return `结束后台任务 ${t.label}`;
   }
 }
 
@@ -224,6 +248,7 @@ function Approval({ step: t }: { step: ToolTrace }) {
         <div className="min-w-0">
           <div className="break-all font-medium">{t.ask?.what}</div>
           {danger && <div className="mt-0.5 text-bad">危险操作：{danger}</div>}
+          {t.ask?.review && <div className="mt-0.5 text-warn">智能审批：{t.ask.review}</div>}
         </div>
       </div>
       {t.ask?.diff && <Diff lines={t.ask.diff} />}
@@ -249,6 +274,7 @@ function Approval({ step: t }: { step: ToolTrace }) {
 
 function Step({ step: t, messageId }: { step: ToolTrace; messageId: string }) {
   const open = useUi((s) => s.open);
+  const openPane = useUi((s) => s.openPane);
   const kept = useData((s) => t.name === "remember" && remembered(s.memories, t.label));
   const [undoError, setUndoError] = useState("");
   if (t.status === "waiting") return t.name === "ask_user" ? <Question step={t} /> : <Approval step={t} />;
@@ -256,7 +282,27 @@ function Step({ step: t, messageId }: { step: ToolTrace; messageId: string }) {
   const head = (
     <>
       <Icon size={14} className={clsx("shrink-0", t.status === "running" && "animate-spin", t.status === "error" && "text-bad")} />
-      <span className="min-w-0 truncate">{verb(t)}</span>
+      {FILE_STEPS.has(t.name) && t.root && t.status !== "error" ? (
+        <button
+          type="button"
+          title="在侧栏查看这个文件"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openPane({ kind: "file", root: t.root!, path: t.label });
+          }}
+          className="min-w-0 truncate text-left underline decoration-line-2 underline-offset-2 hover:text-fg"
+        >
+          {verb(t)}
+        </button>
+      ) : (
+        <span className="min-w-0 truncate">{verb(t)}</span>
+      )}
+      {t.auto && (
+        <span title={`智能审批放行：${t.auto}`} className="flex shrink-0 items-center gap-0.5 text-ok">
+          <ShieldCheck size={13} /> 已审查
+        </span>
+      )}
       {t.detail && <span className={clsx("shrink-0", t.status === "error" ? "text-bad" : "text-fg-3")}>· {t.detail}</span>}
     </>
   );

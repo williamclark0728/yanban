@@ -82,7 +82,12 @@ createServer(async (req, res) => {
   // Suggested next steps: "建议" ends the reply with a <next> block when the app asks for one.
   if (system.includes("<next>") && /建议/.test(last)) reply += "\n\n<next>生成 PPT|整理成对比表|派到群里写正式稿</next>";
   // 0.6.0: a sub-agent, the goal check, and translating English reasoning.
-  if (system.includes("子智能体。只做下面这个任务")) {
+  // 0.7.0: the smart-approval reviewer (anything that deletes is sent to the user) and rewriting a passage.
+  if (system.includes("你是安全审查员")) {
+    reply = /删除|Remove-Item|del /.test(last) ? JSON.stringify({ safe: false, reason: "要删除文件，先问用户" }) : JSON.stringify({ safe: true, reason: "只写工作区里和任务有关的文件" });
+  } else if (system.includes("文档里的一段")) {
+    reply = `（改写）${/<选中>\n([\s\S]*?)\n<\/选中>/.exec(last)?.[1] ?? ""}`;
+  } else if (system.includes("子智能体。只做下面这个任务")) {
     reply = `子任务结果：关于「${last.slice(0, 20)}」的三条要点，出处见 [1]。`;
   } else if (system.includes("判断一个会话目标")) {
     reply = /已经进行了 [2-9] 轮/.test(last) ? JSON.stringify({ done: true, left: "" }) : JSON.stringify({ done: false, left: "还差一张对比表" });
@@ -158,6 +163,20 @@ createServer(async (req, res) => {
     call = { name: "ask_user", arguments: { question: "报告要用中文还是英文？", options: ["中文", "英文", "中英双语"] } };
   } else if (/重复搜索/.test(last) && tools.includes("web_search") && toolCalls < 4) {
     call = { name: "web_search", arguments: { query: "同一个问题" } };
+  } else if (/定时/.test(last) && tools.includes("schedule_task") && lastMsg?.role !== "tool") {
+    call = { name: "schedule_task", arguments: { prompt: "搜一下模型压缩的新论文", time: "08:00", repeat: "daily" } };
+  } else if (/写进文档/.test(last) && tools.includes("edit_doc") && lastMsg?.role !== "tool") {
+    call = { name: "edit_doc", arguments: { mode: "append", new_text: "## 结论\n\n准确率由 71.3% 提升到 73.3%。" } };
+  } else if (/后台跑/.test(last) && tools.includes("start_job") && lastMsg?.role !== "tool") {
+    call = { name: "start_job", arguments: { command: "1..4 | % { \"step $_\"; Start-Sleep 1 }" } };
+  } else if (/看后台/.test(last) && tools.includes("job_output") && lastMsg?.role !== "tool") {
+    call = { name: "job_output", arguments: { id: /job-\d+/.exec(last)?.[0] ?? "job-1", wait: 10 } };
+  } else if (/删掉文件/.test(last) && tools.includes("run_command") && lastMsg?.role !== "tool") {
+    call = { name: "run_command", arguments: { command: "Remove-Item hello.md" } };
+  } else if (/生成报告/.test(last) && tools.includes("run_command") && lastMsg?.role !== "tool") {
+    call = { name: "run_command", arguments: { command: "New-Item -ItemType Directory -Force out | Out-Null; Set-Content -Encoding utf8 报告.md '# 报告'; Set-Content -Encoding utf8 out/数据.csv 'a,b'" } };
+  } else if (lastMsg?.role === "tool" && /定时|写进文档|后台跑|看后台|删掉文件|生成报告/.test(last)) {
+    reply = `完成：${String(lastMsg.content).slice(0, 120)}`;
   } else if (/查资料库/.test(last) && tools.includes("search_library") && lastMsg?.role !== "tool") {
     call = { name: "search_library", arguments: { query: last.replace(/查资料库/g, "").trim() || "稀疏 显存" } };
   } else if (/分头调研/.test(last) && tools.includes("delegate") && lastMsg?.role !== "tool") {

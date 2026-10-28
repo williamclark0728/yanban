@@ -1,4 +1,4 @@
-import { Bookmark, BookOpen, Check, Download, FileText, FolderOpen, LibraryBig, Loader2, Pencil, Plug, Plus, Trash2, Upload, X } from "lucide-react";
+import { Bookmark, BookOpen, CalendarClock, Check, Download, FileText, FolderOpen, LibraryBig, Loader2, Pencil, Plug, Plus, Trash2, Upload, X } from "lucide-react";
 import { useRef, useState, type InputHTMLAttributes } from "react";
 import { importConfig, saveConfigFile } from "../lib/config";
 import { isDesktop, pickFolder } from "../lib/desktop";
@@ -7,8 +7,9 @@ import { testMcp } from "../lib/mcp";
 import { parseSkill, skillsOnDisk } from "../lib/skills";
 import { addDoc, createLibrary, deleteLibrary, removeDoc } from "../lib/library";
 import { addMemory } from "../lib/memory";
+import { addSchedule, dayKey, nextDue, repeatLabel, runSchedule } from "../lib/schedule";
 import { useData, usePrefs } from "../store";
-import type { McpServer, Memory, Skill } from "../types";
+import type { McpServer, Memory, Schedule, Skill } from "../types";
 import { Field, inputCls, Row, StatusBox, type Status } from "./SettingsDialog";
 import { IconButton, Segmented, Switch } from "./ui";
 
@@ -569,6 +570,96 @@ export function LibrarySettings() {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+// ---------- scheduled tasks ----------
+
+const when = (t: number) => new Date(t).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+
+export function ScheduleSettings() {
+  const { schedules, setSchedules, agents } = useData();
+  const [agentId, setAgentId] = useState(agents[0]?.id ?? "");
+  const [time, setTime] = useState("08:00");
+  const [repeat, setRepeat] = useState<Schedule["repeat"]>("daily");
+  const [date, setDate] = useState(() => dayKey(new Date()));
+  const [prompt, setPrompt] = useState("");
+  const [armed, setArmed] = useState<string | null>(null);
+  const ok = agentId && /^\d{2}:\d{2}$/.test(time) && prompt.trim() && (repeat !== "once" || date);
+
+  return (
+    <div className="space-y-4">
+      <p className="px-1 text-[13px] text-fg-3">
+        到点时，研伴把这句话作为一条消息发给所选智能体的私聊，比如每天早上让调研员搜新论文。研伴要开着（桌面版或网页标签页）才会运行；关着时错过的任务，12 小时内重新打开会补跑一次。也可以在私聊里直接说“每天 8 点帮我……”，智能体会自己建好。
+      </p>
+      <form
+        className="space-y-3 rounded-2xl border border-line bg-raise p-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!ok) return;
+          addSchedule({ agentId, prompt: prompt.trim(), time, repeat, date: repeat === "once" ? date : undefined });
+          setPrompt("");
+        }}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={agentId} onChange={(e) => setAgentId(e.target.value)} aria-label="智能体" className={`${inputCls} h-9 w-auto pr-8`}>
+            {agents.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+          <Segmented size="sm" value={repeat} onChange={setRepeat} options={[{ value: "daily", label: "每天" }, { value: "weekdays", label: "工作日" }, { value: "once", label: "只一次" }]} />
+          {repeat === "once" && <input type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="日期" className={`${inputCls} h-9 w-auto`} />}
+          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} aria-label="时间" className={`${inputCls} h-9 w-auto`} />
+        </div>
+        <textarea className={area} rows={2} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="到点时发给它的话，比如：搜一下最近一周模型压缩方向的新论文，列出标题、链接和一句话总结" />
+        <div className="flex justify-end">
+          <button type="submit" className={solid} disabled={!ok}>
+            添加
+          </button>
+        </div>
+      </form>
+      {schedules.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-line px-4 py-8 text-center text-sm text-fg-3">还没有定时任务</div>
+      ) : (
+        <div className="divide-y divide-line rounded-2xl border border-line bg-raise">
+          {schedules.map((s) => {
+            const agent = agents.find((a) => a.id === s.agentId);
+            const next = nextDue(s);
+            return (
+              <div key={s.id} className="flex items-start gap-3 px-4 py-3">
+                <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent-text">
+                  <CalendarClock size={17} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium">
+                    {repeatLabel(s)} {s.time} · {agent?.name ?? "已删除的智能体"}
+                  </div>
+                  <div className="line-clamp-2 text-[13.5px] text-fg-2">{s.prompt}</div>
+                  <div className="text-[12px] text-fg-3">
+                    {[next && `下次 ${when(next.getTime())}`, s.lastRun && `上次 ${when(s.lastRun)}`, !s.enabled && "已关闭"].filter(Boolean).join(" · ")}
+                  </div>
+                </div>
+                <button type="button" disabled={!agent} onClick={() => runSchedule(s.id)} className="h-8 shrink-0 rounded-full px-3 text-[13px] font-medium text-accent-text hover:bg-hover disabled:opacity-40">
+                  立即运行
+                </button>
+                {armed === s.id ? (
+                  <button type="button" onClick={() => setSchedules(schedules.filter((x) => x.id !== s.id))} className="h-8 shrink-0 rounded-full bg-bad px-3 text-[12.5px] font-semibold text-white">
+                    确认删除
+                  </button>
+                ) : (
+                  <IconButton aria-label="删除" onClick={() => setArmed(s.id)}>
+                    <Trash2 size={16} />
+                  </IconButton>
+                )}
+                <Switch checked={s.enabled} onChange={(enabled) => setSchedules(schedules.map((x) => (x.id === s.id ? { ...x, enabled } : x)))} label="启用" />
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
