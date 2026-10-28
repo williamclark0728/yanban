@@ -1,3 +1,4 @@
+import clsx from "clsx";
 import { CornerDownLeft, Loader2, Quote, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { uid, useBusy } from "../lib/chat";
@@ -6,7 +7,7 @@ import { describeError, streamReply } from "../lib/llm";
 import { resolveModel, useData, usePrefs, useUi, type Aside } from "../store";
 import type { Attachment } from "../types";
 import { BotAvatar } from "./Avatar";
-import { Composer } from "./Composer";
+import { Composer, type ComposerHandle } from "./Composer";
 import { RichText } from "./MessageItem";
 import { IconButton } from "./ui";
 
@@ -22,10 +23,18 @@ interface Turn {
 
 const FIRST = "讲解一下这段";
 
+/** One-click starts for the first question; `fill` puts text in the box for the user to finish. */
+const STARTERS: { label: string; fill?: string }[] = [
+  { label: FIRST },
+  { label: "举个简单的例子" },
+  { label: "我的理解是…对吗？", fill: "我的理解是：" },
+];
+
 const RULES = [
   "用户在读你之前的一段回答时选中了其中一部分，想单独弄懂它。",
   "只讲这一部分：先用一两句话说清它的意思，再解释其中的概念、术语或推理步骤，必要时举一个简单的例子。",
-  "按初学者的水平讲，少用术语；不要重复整段回答。用户接着追问时，围绕这一部分回答。",
+  "按初学者的水平讲，少用术语；不要重复整段回答。回答用户具体问的，围绕这一部分。",
+  "用户先说了自己的理解时，先指出哪里对、哪里不对，再补充或纠正。",
 ].join("\n");
 
 /**
@@ -42,6 +51,7 @@ export function ExplainPanel({ aside }: { aside: Aside }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const ctrl = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
+  const composer = useRef<ComposerHandle>(null);
   const busy = turns.at(-1)?.status === "streaming";
 
   const ask = async (question: string, files: Attachment[], before: Turn[]) => {
@@ -84,10 +94,10 @@ export function ExplainPanel({ aside }: { aside: Aside }) {
     }
   };
 
+  // The panel opens with the passage only; the user writes the first question (or picks a starter).
   useEffect(() => {
-    void ask(FIRST, [], []);
+    composer.current?.focus();
     return () => ctrl.current?.abort();
-    // One explanation per opened passage; the panel is keyed by it.
   }, []);
 
   useEffect(() => {
@@ -124,13 +134,28 @@ export function ExplainPanel({ aside }: { aside: Aside }) {
           <Quote size={14} className="mt-1 shrink-0 text-fg-3" />
           <span className="line-clamp-6 whitespace-pre-wrap">{aside.quote}</span>
         </div>
+        {turns.length === 0 && (
+          <div className="text-[13px] text-fg-3">
+            <p>在下面写你对这段的问题，或者先说说你的理解让它帮你看对不对。也可以直接点：</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {STARTERS.map((s) => (
+                <button
+                  key={s.label}
+                  type="button"
+                  onClick={() => (s.fill ? composer.current?.focus(s.fill) : void ask(s.label, [], []))}
+                  className="rounded-full border border-line-2 bg-raise px-3 py-1 text-[13px] text-fg hover:bg-hover"
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {turns.map((t, i) =>
           t.role === "user" ? (
-            i > 0 && (
-              <div key={t.id} className="mt-4 flex justify-end">
-                <div className="max-w-[85%] rounded-[18px] bg-bubble-me px-3.5 py-2 text-[14px]">{t.text}</div>
-              </div>
-            )
+            <div key={t.id} className={clsx("flex justify-end", i > 0 && "mt-4")}>
+              <div className="max-w-[85%] whitespace-pre-wrap rounded-[18px] bg-bubble-me px-3.5 py-2 text-[14px]">{t.text}</div>
+            </div>
           ) : (
             <div key={t.id} className="mt-3">
               <div className="rounded-[18px] bg-bubble px-3.5 py-2.5">
@@ -156,7 +181,8 @@ export function ExplainPanel({ aside }: { aside: Aside }) {
       </div>
       <div className="px-3 pb-3">
         <Composer
-          placeholder="继续追问这一段"
+          ref={composer}
+          placeholder={turns.length ? "继续追问这一段" : "针对这段写下你的问题或理解"}
           members={[]}
           busy={busy}
           onStop={() => ctrl.current?.abort()}

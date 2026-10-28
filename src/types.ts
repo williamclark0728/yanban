@@ -49,6 +49,8 @@ export interface Group {
   consensus: "strict" | "relaxed";
   /** Desktop work mode for the whole group: every member works in this folder. */
   workspace?: string;
+  /** How this group works, from its template; the lead plans by it. */
+  guide?: string;
 }
 
 export type ChatRef = { kind: "agent" | "group"; id: string };
@@ -75,6 +77,8 @@ export interface TeamTemplate {
   leadKey: string;
   maxRounds: number;
   consensus: Group["consensus"];
+  /** How the team works, handed to the lead when it plans. */
+  guide?: string;
   /** Built-in templates ship with the app and cannot be edited. */
   builtIn?: boolean;
   createdAt?: number;
@@ -138,7 +142,25 @@ export type TextMessage = Base & {
   todos?: Todo[];
   /** Written in plan mode: a plan the user can approve with one click. */
   plan?: boolean;
+  /** What the user inserted (Enter) while this reply was running; the model read it before its next step. */
+  steers?: string[];
+  /** Replies to the same question from several models, shown side by side; they share this id. */
+  compare?: string;
+  /** In a comparison: the model that wrote this one, and whether the user picked it to carry on. */
+  model?: string;
+  chosen?: boolean;
+  /** What the user will likely want next, offered as buttons under the reply. */
+  next?: string[];
 };
+
+/** Something about the user every agent keeps in mind, across chats. */
+export interface Memory {
+  id: string;
+  text: string;
+  at: number;
+  /** The agent that saved it; empty when the user wrote it. */
+  by?: string;
+}
 
 export interface Todo {
   text: string;
@@ -185,7 +207,7 @@ export interface Source {
 
 export interface ToolTrace {
   id: string;
-  name: "web_search" | "read_page" | "dispatch_to_group" | "make_file" | "use_skill" | "install_skill" | "mcp" | "ask_user" | LocalTool;
+  name: "web_search" | "read_page" | "dispatch_to_group" | "make_file" | "use_skill" | "install_skill" | "mcp" | "ask_user" | "remember" | "search_chats" | LocalTool;
   /** One line for the UI, e.g. the search query or the group name. */
   label: string;
   /** "waiting": a local action waits for the user's approval. */

@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { AlertCircle, ArrowUp, BookOpen, FileText, Loader2, Plus, Quote, Slash, Square, Users, X } from "lucide-react";
+import { AlertCircle, ArrowUp, BookOpen, Clock, FileText, Loader2, Plus, Quote, Slash, Square, Users, X } from "lucide-react";
 import { useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
 import { ALL } from "../lib/collab";
 import { call, isDesktop } from "../lib/desktop";
@@ -14,6 +14,8 @@ export interface ComposerHandle {
   quote: (text: string) => void;
   /** Focuses the box, optionally typing `insert` into an empty one. */
   focus: (insert?: string) => void;
+  /** Puts a queued message back in the box for editing. */
+  restore: (text: string, files?: Attachment[]) => void;
 }
 
 /** A slash command: runs right away instead of being sent to the model. */
@@ -66,7 +68,7 @@ export function Composer({
   placeholder: string;
   members: Agent[];
   busy?: boolean;
-  /** While busy, sending is still allowed: the message waits for the running reply. */
+  /** While busy, sending is still allowed: Enter inserts into the running reply, Ctrl+Enter queues. */
   canQueue?: boolean;
   tools?: ReactNode;
   /** Shown just before the send button. */
@@ -77,7 +79,8 @@ export function Composer({
   skills?: Skill[];
   /** Desktop work mode: `@` also finds files in this folder. */
   workspace?: string;
-  onSend: (text: string, attachments: Attachment[]) => void;
+  /** `queued`: Ctrl+Enter (or the clock button) while busy. */
+  onSend: (text: string, attachments: Attachment[], queued?: boolean) => void;
   onStop?: () => void;
   ref?: Ref<ComposerHandle>;
 }) {
@@ -137,6 +140,11 @@ export function Composer({
     },
     focus: (insert) => {
       if (insert) setText((t) => t || insert);
+      ref.current?.focus();
+    },
+    restore: (value, files = []) => {
+      setText(value);
+      setPending(files.map((file) => ({ key: crypto.randomUUID(), name: file.name, size: typeof file.size === "number" ? file.size : 0, status: "ready", file })));
       ref.current?.focus();
     },
   }));
@@ -222,10 +230,10 @@ export function Composer({
   const hasContent = !!text.trim() || ready.length > 0;
   const canSend = (!busy || canQueue) && !reading && hasContent;
 
-  const submit = () => {
+  const submit = (queued = false) => {
     if (!canSend) return;
     const quote = quoted ? `${quoted.split("\n").map((l) => `> ${l}`).join("\n")}\n\n` : "";
-    onSend(`${quote}${text.trim()}`, [...picked.map(skillAttachment), ...ready]);
+    onSend(`${quote}${text.trim()}`, [...picked.map(skillAttachment), ...ready], busy && queued);
     setText("");
     setPending([]);
     setPicked([]);
@@ -370,7 +378,7 @@ export function Composer({
                 onStop?.();
               } else if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                submit();
+                submit(e.ctrlKey || e.metaKey);
               }
             }}
             className="max-h-[200px] min-h-9 flex-1 resize-none bg-transparent py-[7px] leading-[22px] outline-none placeholder:text-fg-3"
@@ -387,12 +395,23 @@ export function Composer({
               <Square size={13} fill="currentColor" />
             </button>
           )}
+          {busy && canQueue && hasContent && (
+            <button
+              type="button"
+              aria-label="排队"
+              title="排队（Ctrl+Enter）：这条回复完成后再发"
+              onClick={() => submit(true)}
+              className="grid size-9 shrink-0 place-items-center rounded-full bg-raise-2 text-fg-2 transition-colors hover:bg-active hover:text-fg"
+            >
+              <Clock size={17} />
+            </button>
+          )}
           {(!busy || (canQueue && hasContent)) && (
             <button
               type="button"
-              aria-label={busy ? "排队发送" : "发送"}
-              title={busy ? "排队：这条回复完成后再发" : undefined}
-              onClick={submit}
+              aria-label={busy ? "插入" : "发送"}
+              title={busy ? "插入（Enter）：正在回复的智能体下一步就能看到；群聊里会排队" : undefined}
+              onClick={() => submit()}
               disabled={!canSend}
               className={clsx(
                 "grid size-9 shrink-0 place-items-center rounded-full transition-colors",

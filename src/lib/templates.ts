@@ -44,6 +44,38 @@ const planner: TemplateMember = {
   params: { temperature: 0.7 },
 };
 
+/** Two searchers that look into different sub-questions at the same time. */
+const searcher = (key: string, name: string, color: TemplateMember["color"], look: number): TemplateMember => ({
+  key,
+  name,
+  color,
+  look,
+  tagline: "按分到的子问题联网检索，整理成带出处的要点",
+  role: {
+    duty: "只查分给你的子问题：先想好 2–3 个检索角度（定义与现状、关键数据、不同观点或争议），每个角度至少搜一次，重要的结果读原文。",
+    scope: "只写搜到的内容，每条事实后标来源编号 [n]；查不到的写明没查到，不猜。",
+    io: "输入：子问题。输出：分点的要点（事实 + 编号），末尾列出来源：编号、标题、链接。",
+    protocol: "和另一位检索员各查各的，不重复；撰写人会用你的要点和来源写报告。",
+  },
+  params: { temperature: 0.4 },
+  web: true,
+});
+
+const author: TemplateMember = {
+  key: "author",
+  name: "撰写人",
+  color: "violet",
+  look: 0.15,
+  tagline: "把检索结果写成带引用编号的调研报告",
+  role: {
+    duty: "把检索员的要点整合成一篇调研报告：摘要、按子问题分节论述、需要时加对比表、结论和仍不确定的地方。",
+    scope: "只用检索员给出的材料，不自己补充事实。引用编号全文重新从 [1] 连续编排；同一来源用同一个编号。",
+    io: "输入：检索员的要点和来源。输出：完整报告，末尾「参考文献」按编号列出标题和链接，链接都来自检索员的来源列表。",
+    protocol: "按核查员的意见修订，说明改了哪几处。",
+  },
+  params: { temperature: 0.5 },
+};
+
 export const builtInTemplates: TeamTemplate[] = [
   {
     id: "paper",
@@ -63,6 +95,21 @@ export const builtInTemplates: TeamTemplate[] = [
     leadKey: butler.key,
     maxRounds: 2,
     consensus: "strict",
+    builtIn: true,
+  },
+  {
+    id: "deep",
+    name: "深度调研组",
+    description: "管家拆子问题，两位检索员并行查，撰写人写成带引用编号的报告，核查员逐条核对出处",
+    members: [butler, searcher("searcher-a", "检索员甲", "teal", -0.3), searcher("searcher-b", "检索员乙", "amber", 0.3), author, checker],
+    leadKey: butler.key,
+    maxRounds: 2,
+    consensus: "strict",
+    guide: [
+      "1. 把用户的主题拆成 2–4 个互不重叠的子问题，分给检索员甲和检索员乙（都是 produce），task 里写清各自负责哪几个子问题，两人同时开始。",
+      "2. 撰写人（produce）的 after 写「检索员甲、检索员乙」，等两人都完成后把材料写成一篇报告，引用编号连续，末尾列参考文献。",
+      "3. 核查员（review）核对报告里每条引用是否在检索员的来源里、数字是否一致、有没有没出处的结论。",
+    ].join("\n"),
     builtIn: true,
   },
   {
@@ -137,6 +184,7 @@ export function instantiate(t: TeamTemplate, name: string): string {
     leadId: ids.get(t.leadKey) ?? memberIds[0],
     maxRounds: t.maxRounds,
     consensus: t.consensus,
+    guide: t.guide,
   };
   addGroup(group);
   return group.id;
@@ -156,6 +204,7 @@ export function snapshot(group: Group, agents: Agent[], name: string, descriptio
     leadKey: group.leadId,
     maxRounds: group.maxRounds,
     consensus: group.consensus,
+    guide: group.guide,
     createdAt: Date.now(),
   };
 }

@@ -4,16 +4,16 @@ import { presets, fromPreset } from "./lib/catalog";
 import { addExamples, db, ensureSeeded, getKv, setKv } from "./lib/db";
 import { isDesktop } from "./lib/desktop";
 import { loadUsage } from "./lib/usage";
-import type { Agent, ChatRef, Group, McpServer, Message, ModelParams, ModelRef, Provider, Run, SearchConfig, Skill, TeamTemplate } from "./types";
+import type { Agent, ChatRef, Group, McpServer, Memory, Message, ModelParams, ModelRef, Provider, Run, SearchConfig, Skill, TeamTemplate } from "./types";
 
 export type Theme = "dark" | "light" | "system";
 export type PanelTab = "info" | "members" | "runs" | "memory";
-export type SettingsTab = "general" | "providers" | "search" | "skills" | "mcp" | "usage";
+export type SettingsTab = "general" | "providers" | "search" | "skills" | "mcp" | "memory" | "usage";
 
 /** Desktop work mode: which local actions need the user's OK. Dangerous commands always do. */
 export type Approval = "ask" | "read" | "full";
 
-export type FontSize = "small" | "medium" | "large";
+export type FontSize = "small" | "medium" | "large" | "xlarge";
 
 interface Prefs {
   mode: "simple" | "dev";
@@ -25,13 +25,26 @@ interface Prefs {
   fontSize: FontSize;
   /** "brief" folds a reply's tool steps into one line until clicked; approvals always show. */
   steps: "full" | "brief";
-  /** Messages sent while a reply is running wait and go out after it, instead of being blocked. */
-  queue: boolean;
+  /** Desktop: the whole window's zoom (Ctrl + plus / minus); the website leaves this to the browser. */
+  zoom: number;
+  /** Agents may save what they learn about the user (remember). */
+  autoMemory: boolean;
+  /** Replies may end with suggested next steps, shown as buttons. */
+  suggest: boolean;
   setMode: (mode: Prefs["mode"]) => void;
   setTheme: (theme: Theme) => void;
   setName: (name: string) => void;
   setApproval: (approval: Approval) => void;
-  set: (patch: Partial<Pick<Prefs, "fontSize" | "steps" | "queue">>) => void;
+  set: (patch: Partial<Pick<Prefs, "fontSize" | "steps" | "zoom" | "autoMemory" | "suggest">>) => void;
+}
+
+export const ZOOM_MIN = 0.6;
+export const ZOOM_MAX = 2;
+const ZOOM_STEPS = [0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.4, 1.6, 1.8, 2];
+
+/** The next zoom level up (+1) or down (-1), like a browser's steps. */
+export function stepZoom(zoom: number, dir: 1 | -1) {
+  return dir > 0 ? (ZOOM_STEPS.find((z) => z > zoom + 0.001) ?? ZOOM_MAX) : (ZOOM_STEPS.findLast((z) => z < zoom - 0.001) ?? ZOOM_MIN);
 }
 
 export const usePrefs = create<Prefs>()(
@@ -43,7 +56,9 @@ export const usePrefs = create<Prefs>()(
       approval: "read",
       fontSize: "medium",
       steps: "full",
-      queue: true,
+      zoom: 1,
+      autoMemory: true,
+      suggest: true,
       setMode: (mode) => set({ mode }),
       setTheme: (theme) => set({ theme }),
       setName: (name) => set({ name: name.slice(0, 20) }),
@@ -67,8 +82,12 @@ interface Ui {
   active: ChatRef | null;
   aside: Aside | null;
   /** A composer popover opened from a slash command. */
-  chip: "model" | "effort" | null;
+  chip: "model" | "effort" | "compare" | null;
   helpOpen: boolean;
+  /** A message to scroll to and flash, e.g. picked from the history search. */
+  focus: { id: string; key: number } | null;
+  /** Text to quote into the open chat's composer, e.g. an old message from the history search. */
+  quote: { text: string; key: number } | null;
   panelOpen: boolean;
   panelTab: PanelTab;
   settingsOpen: boolean;
@@ -93,6 +112,8 @@ interface Ui {
   closeAside: () => void;
   setChip: (chip: Ui["chip"]) => void;
   setHelp: (open: boolean) => void;
+  focusMessage: (id: string | null) => void;
+  quoteInto: (text: string | null) => void;
 }
 
 export const useUi = create<Ui>()((set) => ({
@@ -100,6 +121,8 @@ export const useUi = create<Ui>()((set) => ({
   aside: null,
   chip: null,
   helpOpen: false,
+  focus: null,
+  quote: null,
   panelOpen: false,
   panelTab: "info",
   settingsOpen: false,
@@ -121,6 +144,8 @@ export const useUi = create<Ui>()((set) => ({
   closeAside: () => set({ aside: null }),
   setChip: (chip) => set({ chip }),
   setHelp: (helpOpen) => set({ helpOpen }),
+  focusMessage: (id) => set({ focus: id ? { id, key: Date.now() } : null }),
+  quoteInto: (text) => set({ quote: text ? { text, key: Date.now() } : null }),
 }));
 
 interface Data {
@@ -145,6 +170,9 @@ interface Data {
   setSkills: (skills: Skill[]) => void;
   mcpServers: McpServer[];
   setMcpServers: (servers: McpServer[]) => void;
+  /** Long-term memory about the user, shared by every agent. */
+  memories: Memory[];
+  setMemories: (memories: Memory[]) => void;
   /** The site's own web search, when the server offers it. */
   siteSearch: { limit: number; remaining: number } | null;
   refreshSiteSearch: () => Promise<void>;
@@ -213,10 +241,11 @@ export const useData = create<Data>()((set, get) => ({
   templates: [],
   skills: [],
   mcpServers: [],
+  memories: [],
 
   load: async () => {
     await ensureSeeded();
-    const [stored, groups, messages, runs, providers, defaultModel, search, templates, skills, mcpServers, uncapped] = await Promise.all([
+    const [stored, groups, messages, runs, providers, defaultModel, search, templates, skills, mcpServers, uncapped, memories] = await Promise.all([
       db.agents.toArray(),
       db.groups.toArray(),
       db.messages.orderBy("at").toArray(),
@@ -228,6 +257,7 @@ export const useData = create<Data>()((set, get) => ({
       getKv<Skill[]>("skills", []),
       getKv<McpServer[]>("mcpServers", []),
       getKv("uncapped", false),
+      getKv<Memory[]>("memories", []),
     ]);
     // Replies used to stop at 2048 tokens by default, which cut long files short. That default now means no cap.
     const agents = uncapped ? stored : stored.map((a) => (a.params.maxTokens === 2048 ? { ...a, params: { ...a.params, maxTokens: 0 } } : a));
@@ -243,7 +273,7 @@ export const useData = create<Data>()((set, get) => ({
         : m,
     );
     const trial = get().trial;
-    set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(trial ? [...providers, trialProvider(trial)] : providers), defaultModel, search, templates, skills, mcpServers });
+    set({ loaded: true, agents, groups, messages: fixed, runs, providers: sortProviders(trial ? [...providers, trialProvider(trial)] : providers), defaultModel, search, templates, skills, mcpServers, memories });
     void get().refreshTrial();
     void get().refreshSiteSearch();
   },
@@ -298,6 +328,11 @@ export const useData = create<Data>()((set, get) => ({
   setMcpServers: (mcpServers) => {
     set({ mcpServers });
     void setKv("mcpServers", mcpServers);
+  },
+
+  setMemories: (memories) => {
+    set({ memories });
+    void setKv("memories", memories);
   },
 
   saveSearch: (search) => {

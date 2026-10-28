@@ -1,6 +1,7 @@
 import clsx from "clsx";
-import { Bot, LayoutTemplate, Plus, Search, Settings, Users, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { Bot, LayoutTemplate, Plus, Quote, Search, Settings, Users, X } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { searchMessages, type Hit } from "../lib/memory";
 import { listTime } from "../lib/time";
 import { useData, usePrefs, useUi } from "../store";
 import type { ChatRef, Message } from "../types";
@@ -9,7 +10,7 @@ import { IconButton } from "./ui";
 
 export function Sidebar() {
   const { agents, groups, messages, unread } = useData();
-  const { active, open, search, setSearch, openSettings, edit } = useUi();
+  const { active, open, search, setSearch, openSettings, edit, focusMessage, quoteInto } = useUi();
   const mode = usePrefs((s) => s.mode);
   const name = usePrefs((s) => s.name.trim());
   const [searching, setSearching] = useState(false);
@@ -27,6 +28,9 @@ export function Sidebar() {
     .filter((c) => !q || c.name.toLowerCase().includes(q))
     .map((c) => ({ ...c, last: last.get(c.ref.id) }))
     .sort((a, b) => (b.last?.at ?? 0) - (a.last?.at ?? 0));
+
+  // Searching also looks through every message, so an old answer can be found again.
+  const hits = useMemo(() => (q ? searchMessages(q, 40) : []), [q, messages]);
 
   const preview = (m?: Message) => {
     if (!m) return { text: "", who: "", time: "" };
@@ -129,7 +133,25 @@ export function Sidebar() {
             </button>
           );
         })}
-        {rows.length === 0 && <p className="px-4 py-10 text-center text-sm text-fg-3">没有匹配的会话</p>}
+        {rows.length === 0 && !hits.length && <p className="px-4 py-10 text-center text-sm text-fg-3">没有匹配的会话或消息</p>}
+        {hits.length > 0 && (
+          <>
+            <div className="px-3 pb-1 pt-3 text-xs font-medium text-fg-3">聊天记录（{hits.length}{hits.length >= 40 ? "+" : ""}）</div>
+            {hits.map((h) => (
+              <HitRow
+                key={h.id}
+                hit={h}
+                query={q}
+                onOpen={() => {
+                  const kind = groups.some((g) => g.id === h.chat) ? "group" : "agent";
+                  open({ kind, id: h.chat });
+                  focusMessage(h.id);
+                }}
+                onQuote={active ? () => quoteInto(quoteOf(h, messages)) : undefined}
+              />
+            ))}
+          </>
+        )}
       </nav>
 
       <footer className="flex items-center gap-2 border-t border-line px-3 py-3">
@@ -146,6 +168,55 @@ export function Sidebar() {
         </IconButton>
       </footer>
     </aside>
+  );
+}
+
+/** The whole message a hit points to, labelled with where it was said, for quoting into the open chat. */
+function quoteOf(h: Hit, messages: Message[]) {
+  const m = messages.find((x) => x.id === h.id);
+  const text = m && m.kind !== "round" ? m.text : h.snippet;
+  return `${h.where}${h.who ? ` · ${h.who}` : ""}（${new Date(h.at).toLocaleDateString("zh-CN")}）：${text.slice(0, 3000)}`;
+}
+
+/** The snippet with the first search word marked. */
+function Marked({ text, query }: { text: string; query: string }) {
+  const word = query.split(/\s+/)[0];
+  const at = word ? text.toLowerCase().indexOf(word) : -1;
+  if (at < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, at)}
+      <mark className="rounded bg-accent-soft px-0.5 text-accent-text">{text.slice(at, at + word.length)}</mark>
+      {text.slice(at + word.length)}
+    </>
+  );
+}
+
+function HitRow({ hit, query, onOpen, onQuote }: { hit: Hit; query: string; onOpen: () => void; onQuote?: () => void }) {
+  return (
+    <div className="group/h relative">
+      <button type="button" onClick={onOpen} className="w-full rounded-2xl px-3 py-2 text-left transition-colors hover:bg-hover">
+        <div className="flex items-center gap-2 text-[12.5px] text-fg-3">
+          <span className="truncate font-medium text-fg-2">{hit.where}</span>
+          {hit.who && <span className="shrink-0">· {hit.who}</span>}
+          <span className="ml-auto shrink-0">{listTime(hit.at)}</span>
+        </div>
+        <div className="mt-0.5 line-clamp-2 text-[13.5px] text-fg-2">
+          <Marked text={hit.snippet} query={query} />
+        </div>
+      </button>
+      {onQuote && (
+        <button
+          type="button"
+          title="引用到当前对话"
+          aria-label="引用到当前对话"
+          onClick={onQuote}
+          className="absolute bottom-1.5 right-2 hidden h-7 items-center gap-1 rounded-full border border-line bg-raise px-2.5 text-[12px] font-medium shadow-[var(--shadow)] hover:bg-raise-2 group-hover/h:flex"
+        >
+          <Quote size={12} /> 引用
+        </button>
+      )}
+    </div>
   );
 }
 

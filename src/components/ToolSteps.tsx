@@ -2,6 +2,7 @@ import clsx from "clsx";
 import {
   AlertCircle,
   BookOpen,
+  Bookmark,
   ChevronDown,
   Download,
   FilePen,
@@ -10,6 +11,7 @@ import {
   FileText,
   FolderOpen,
   Globe,
+  History,
   Hand,
   ListChecks,
   Loader2,
@@ -23,8 +25,9 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { answerQuestion, useQuestions } from "../lib/agentTools";
+import { forget, remembered } from "../lib/memory";
 import { answer, undo, usePending } from "../lib/workmode";
-import { usePrefs, useUi } from "../store";
+import { useData, usePrefs, useUi } from "../store";
 import type { DiffLine, ToolTrace } from "../types";
 
 const icons = {
@@ -42,6 +45,8 @@ const icons = {
   edit_file: FilePen,
   run_command: SquareTerminal,
   ask_user: MessageCircleQuestion,
+  remember: Bookmark,
+  search_chats: History,
 };
 
 const short = (s: string, n = 60) => (s.length > n ? `${s.slice(0, n)}…` : s);
@@ -75,6 +80,10 @@ function verb(t: ToolTrace) {
       return t.status === "running" ? `已派到「${t.label}」` : `「${t.label}」`;
     case "ask_user":
       return t.answer ? `问你：${short(t.label, 40)} → ${short(t.answer, 40)}` : `问你：${short(t.label, 60)}`;
+    case "remember":
+      return `记住：${short(t.label, 60)}`;
+    case "search_chats":
+      return `搜索旧对话「${short(t.label, 40)}」`;
   }
 }
 
@@ -232,6 +241,7 @@ function Approval({ step: t }: { step: ToolTrace }) {
 
 function Step({ step: t, messageId }: { step: ToolTrace; messageId: string }) {
   const open = useUi((s) => s.open);
+  const kept = useData((s) => t.name === "remember" && remembered(s.memories, t.label));
   const [undoError, setUndoError] = useState("");
   if (t.status === "waiting") return t.name === "ask_user" ? <Question step={t} /> : <Approval step={t} />;
   const Icon = t.status === "running" ? Loader2 : t.status === "error" ? AlertCircle : icons[t.name];
@@ -252,6 +262,26 @@ function Step({ step: t, messageId }: { step: ToolTrace; messageId: string }) {
           <button type="button" onClick={() => open({ kind: "group", id: t.groupId! })} className="shrink-0 text-[13px] font-medium text-accent-text hover:underline">
             去群里看
           </button>
+        )}
+      </div>
+    );
+  }
+
+  // A memory the agent saved: it can be dropped right here, or later in Settings → Memory.
+  if (t.name === "remember" && t.status === "done") {
+    return (
+      <div className={row}>
+        {head}
+        {kept ? (
+          <button
+            type="button"
+            onClick={() => forget(t.label)}
+            className="ml-auto flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12.5px] font-medium text-accent-text hover:bg-hover"
+          >
+            <Undo2 size={13} /> 忘掉
+          </button>
+        ) : (
+          !t.detail && <span className="shrink-0 text-fg-3">· 已删除</span>
         )}
       </div>
     );

@@ -1,12 +1,13 @@
-import { BookOpen, Download, FolderOpen, Pencil, Plug, Plus, Trash2, Upload } from "lucide-react";
+import { Bookmark, BookOpen, Check, Download, FolderOpen, Pencil, Plug, Plus, Trash2, Upload, X } from "lucide-react";
 import { useRef, useState, type InputHTMLAttributes } from "react";
 import { importConfig, saveConfigFile } from "../lib/config";
 import { isDesktop, pickFolder } from "../lib/desktop";
 import { describeError } from "../lib/llm";
 import { testMcp } from "../lib/mcp";
 import { parseSkill, skillsOnDisk } from "../lib/skills";
-import { useData } from "../store";
-import type { McpServer, Skill } from "../types";
+import { addMemory } from "../lib/memory";
+import { useData, usePrefs } from "../store";
+import type { McpServer, Memory, Skill } from "../types";
 import { Field, inputCls, Row, StatusBox, type Status } from "./SettingsDialog";
 import { IconButton, Segmented, Switch } from "./ui";
 
@@ -164,7 +165,7 @@ export function SkillSettings() {
   );
 }
 
-function SkillForm({ skill, onSave, onCancel }: { skill: Skill; onSave: (s: Skill) => void; onCancel: () => void }) {
+export function SkillForm({ skill, onSave, onCancel }: { skill: Skill; onSave: (s: Skill) => void; onCancel: () => void }) {
   const [draft, setDraft] = useState(skill);
   const set = (patch: Partial<Skill>) => setDraft((d) => ({ ...d, ...patch }));
   const ok = draft.name.trim() && draft.body.trim();
@@ -356,6 +357,92 @@ function McpForm({ server, onSave, onCancel, onDelete }: { server: McpServer; on
           保存
         </button>
       </div>
+    </div>
+  );
+}
+
+// ---------- memory ----------
+
+export function MemorySettings() {
+  const { memories, setMemories } = useData();
+  const { autoMemory, set } = usePrefs();
+  const [draft, setDraft] = useState("");
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const add = () => {
+    if (addMemory(draft)) setDraft("");
+  };
+  const save = (m: Memory, text: string) => {
+    const clean = text.trim();
+    setMemories(clean ? memories.map((x) => (x.id === m.id ? { ...x, text: clean } : x)) : memories.filter((x) => x.id !== m.id));
+    setEditing(null);
+  };
+  return (
+    <div className="space-y-4">
+      <p className="px-1 text-[13px] text-fg-3">
+        这里的每一条，所有智能体在每次对话里都能看到（比如年级、研究方向、写作习惯）。智能体自己记下的会注明是谁记的；单个智能体专属的记忆在它的资料页 → 记忆。
+      </p>
+      <div className="divide-y divide-line rounded-2xl border border-line bg-raise">
+        <Row title="让智能体自己记" desc={autoMemory ? "聊天中说到关于你的长期信息时，智能体会记下来，回复里显示「记住：…」" : "只用下面你自己写的记忆"}>
+          <Switch checked={autoMemory} onChange={(v) => set({ autoMemory: v })} label="让智能体自己记" />
+        </Row>
+      </div>
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          add();
+        }}
+      >
+        <input className={`${inputCls} h-10`} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="比如：武汉大学大三，研究方向是模型压缩" maxLength={300} />
+        <button type="submit" className={solid} disabled={!draft.trim()}>
+          添加
+        </button>
+      </form>
+      {memories.length > 0 ? (
+        <div className="divide-y divide-line rounded-2xl border border-line bg-raise">
+          {[...memories].reverse().map((m) => (
+            <div key={m.id} className="flex items-center gap-3 px-4 py-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent-text">
+                <Bookmark size={16} />
+              </span>
+              {editing?.id === m.id ? (
+                <form
+                  className="flex min-w-0 flex-1 items-center gap-1"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    save(m, editing.text);
+                  }}
+                >
+                  <input autoFocus className={`${inputCls} h-9`} value={editing.text} onChange={(e) => setEditing({ id: m.id, text: e.target.value })} maxLength={300} />
+                  <IconButton aria-label="保存" type="submit">
+                    <Check size={16} />
+                  </IconButton>
+                  <IconButton aria-label="取消" onClick={() => setEditing(null)}>
+                    <X size={16} />
+                  </IconButton>
+                </form>
+              ) : (
+                <>
+                  <div className="min-w-0 flex-1">
+                    <div className="break-words">{m.text}</div>
+                    <div className="text-[12px] text-fg-3">
+                      {new Date(m.at).toLocaleDateString("zh-CN")} · {m.by ? `${m.by}记下` : "你写的"}
+                    </div>
+                  </div>
+                  <IconButton aria-label="编辑" onClick={() => setEditing({ id: m.id, text: m.text })}>
+                    <Pencil size={16} />
+                  </IconButton>
+                  <IconButton aria-label="删除" onClick={() => setMemories(memories.filter((x) => x.id !== m.id))}>
+                    <Trash2 size={16} />
+                  </IconButton>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-dashed border-line px-4 py-8 text-center text-sm text-fg-3">还没有记忆</div>
+      )}
     </div>
   );
 }

@@ -74,12 +74,16 @@ createServer(async (req, res) => {
   const system = msgs.find((m) => m.role === "system")?.content ?? "";
   const me = /你是「(.+?)」/.exec(system)?.[1] ?? "助手";
   let reply =
-    `我是${me}。收到：「${last.slice(-60)}」。\n\n` +
+    `我是${me}（${payload.model}）。收到：「${last.slice(-60)}」。\n\n` +
     `- 上下文里有 ${msgs.filter((m) => m.role !== "system").length} 条消息\n` +
     `- 系统提示 ${system.length} 字\n` +
     `- 附件：${files.length ? files.join("、") : "无"}；图片 ${images} 张\n` +
     `- temperature=${payload.temperature} max_tokens=${payload.max_tokens ?? payload.max_completion_tokens} reasoning_effort=${payload.reasoning_effort}`;
-  if (system.includes("你负责审查")) {
+  // Suggested next steps: "建议" ends the reply with a <next> block when the app asks for one.
+  if (system.includes("<next>") && /建议/.test(last)) reply += "\n\n<next>生成 PPT|整理成对比表|派到群里写正式稿</next>";
+  if (system.includes("沉淀成技能")) {
+    reply = "```markdown\n---\nname: 实验结果整理\ndescription: 用户要把实验数据整理成结论和表格时使用\n---\n\n# 实验结果整理\n\n1. 先列步骤清单。\n2. 读数据，核对单位。\n3. 写结论，附对比表。\n```";
+  } else if (system.includes("你负责审查")) {
     // Reviewer: round 1 finds problems, later rounds pass; a single-agent answer ("待审查稿件") gets two problems.
     const round = Number(/第 (\d+) 轮的产出/.exec(last)?.[1] ?? 0);
     const issues =
@@ -101,6 +105,17 @@ createServer(async (req, res) => {
       ? JSON.stringify({ reply: "你好！有任务直接说。", mode: "answer", assignments: [] })
       : /自我介绍/.test(latest)
       ? JSON.stringify({ reply: "请大家介绍一下自己。", mode: "speak", assignments: members.map((m) => ({ member: m, type: "produce", task: "两三句话介绍自己" })) })
+      : /深度调研/.test(latest)
+      ? JSON.stringify({
+          reply: "拆成两个子问题，两位检索员并行查，撰写人汇总。",
+          mode: "work",
+          assignments: [
+            { member: members[0], type: "produce", task: "子问题一：现状" },
+            { member: members[1], type: "produce", task: "子问题二：数据" },
+            { member: members[2], type: "produce", task: "写成带引用编号的报告", after: `${members[0]}、${members[1]}` },
+            ...members.slice(3, 4).map((m) => ({ member: m, type: "review", task: "核对引用" })),
+          ],
+        })
       : /先搜集/.test(latest)
       ? JSON.stringify({
           reply: "先搜集再写。",
@@ -136,6 +151,14 @@ createServer(async (req, res) => {
     call = { name: "ask_user", arguments: { question: "报告要用中文还是英文？", options: ["中文", "英文", "中英双语"] } };
   } else if (/重复搜索/.test(last) && tools.includes("web_search") && toolCalls < 4) {
     call = { name: "web_search", arguments: { query: "同一个问题" } };
+  } else if (/记住/.test(last) && tools.includes("remember") && lastMsg?.role !== "tool") {
+    call = { name: "remember", arguments: { text: "武汉大学大三，研究方向是模型压缩" } };
+  } else if (/找找之前/.test(last) && tools.includes("search_chats") && lastMsg?.role !== "tool") {
+    call = { name: "search_chats", arguments: { query: last.replace(/找找之前|聊过的?/g, "").trim() || "稀疏" } };
+  } else if (lastMsg?.role === "tool" && /记住/.test(last)) {
+    reply = `好的，${String(lastMsg.content)}`;
+  } else if (lastMsg?.role === "tool" && /找找之前/.test(last)) {
+    reply = `旧对话里找到：${String(lastMsg.content).slice(0, 80)}`;
   } else if (lastMsg?.role === "tool" && /列步骤/.test(last)) {
     reply = "三步都做完了。";
   } else if (lastMsg?.role === "tool" && /重复搜索/.test(last)) {

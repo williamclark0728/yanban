@@ -109,10 +109,13 @@ body {
 
 /* Settings → 消息字号. Most UI text has fixed sizes; messages follow the body size. */
 :root[data-size="small"] body {
-  font-size: 14px;
+  font-size: 13px;
 }
 :root[data-size="large"] body {
-  font-size: 17px;
+  font-size: 18px;
+}
+:root[data-size="xlarge"] body {
+  font-size: 21px;
 }
 
 button {

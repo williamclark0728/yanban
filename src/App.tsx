@@ -8,7 +8,8 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { Shortcuts } from "./components/Shortcuts";
 import { Sidebar } from "./components/Sidebar";
 import { UpdateCard } from "./components/UpdateCard";
-import { useData, usePrefs, useUi } from "./store";
+import { isDesktop, setZoom } from "./lib/desktop";
+import { stepZoom, useData, usePrefs, useUi } from "./store";
 
 function useMedia(query: string) {
   return useSyncExternalStore(
@@ -35,8 +36,49 @@ function useTheme() {
   }, [size]);
 }
 
+/**
+ * Desktop: Ctrl + plus / minus / 0 and Ctrl + wheel zoom the whole window, and the level is kept.
+ * The website leaves zooming to the browser, which already does this.
+ */
+function useZoom() {
+  const zoom = usePrefs((s) => s.zoom);
+  useEffect(() => {
+    if (isDesktop) setZoom(zoom).catch(() => {});
+  }, [zoom]);
+  useEffect(() => {
+    if (!isDesktop) return;
+    let last = 0;
+    const change = (dir: 1 | -1 | 0) => {
+      const { zoom, set } = usePrefs.getState();
+      set({ zoom: dir === 0 ? 1 : stepZoom(zoom, dir) });
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const dir = e.key === "=" || e.key === "+" ? 1 : e.key === "-" || e.key === "_" ? -1 : e.key === "0" ? 0 : null;
+      if (dir === null) return;
+      e.preventDefault();
+      change(dir);
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      // A touchpad pinch sends many small events; one step per 150 ms.
+      if (e.timeStamp - last < 150) return;
+      last = e.timeStamp;
+      change(e.deltaY < 0 ? 1 : -1);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("wheel", onWheel);
+    };
+  }, []);
+}
+
 export default function App() {
   useTheme();
+  useZoom();
   const { active, panelOpen, togglePanel, aside, closeAside } = useUi();
   const { loaded, load } = useData();
   const wide = useMedia("(min-width: 1280px)");

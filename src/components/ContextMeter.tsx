@@ -40,7 +40,7 @@ export function ContextMeter({ chat }: { chat: string }) {
           <circle cx="9" cy="9" r={r} fill="none" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2.5" />
           <circle cx="9" cy="9" r={r} fill="none" stroke="currentColor" strokeWidth="2.5" strokeDasharray={`${c * ratio} ${c}`} strokeLinecap="round" />
         </svg>
-        <span className="hidden sm:inline">{Math.round(ratio * 100)}%</span>
+        <span className="hidden sm:inline">{percent(ratio)}</span>
       </button>
       {open && (
         <>
@@ -71,6 +71,12 @@ export function ContextMeter({ chat }: { chat: string }) {
     </div>
   );
 }
+
+/** Small shares keep one decimal, so a chat that has started never reads 0%. */
+const percent = (ratio: number) => {
+  const p = ratio * 100;
+  return p > 0 && p < 10 ? `${p.toFixed(1)}%` : `${Math.round(p)}%`;
+};
 
 export const EFFORTS: { value: Effort; label: string; hint: string }[] = [
   { value: "auto", label: "默认", hint: "按模型服务自己的设置" },

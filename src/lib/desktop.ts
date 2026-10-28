@@ -43,6 +43,12 @@ export async function saveAs(name: string, data: Blob): Promise<string | null> {
   return path;
 }
 
+/** Zooms the whole window, like a browser's Ctrl + plus / minus. */
+export async function setZoom(scale: number) {
+  const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+  await getCurrentWebview().setZoom(scale);
+}
+
 /** Shows a file in Explorer. */
 export const reveal = (path: string) => call("reveal", { path });
 

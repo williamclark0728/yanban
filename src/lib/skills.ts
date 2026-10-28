@@ -1,6 +1,7 @@
 import { jsonSchema, tool, type ToolSet } from "ai";
-import { useData } from "../store";
-import type { Agent, Skill } from "../types";
+import { resolveModel, useData } from "../store";
+import { completeText } from "./llm";
+import type { Agent, Skill, TextMessage } from "../types";
 import { call, isDesktop } from "./desktop";
 import type { Report } from "./tools";
 import { approve } from "./workmode";
@@ -170,4 +171,49 @@ function readSkillFile(skills: Skill[], report: Report) {
       }
     },
   });
+}
+
+// ---------- saving a finished task as a skill ----------
+
+const DRAFT_RULES = [
+  "把下面这次完成的任务整理成一个可复用的技能，格式是 SKILL.md：",
+  "开头 --- 之间写 name（简短的中文名）和 description（一句话：遇到什么样的请求时用这个技能）；正文写可以照做的步骤、要用到的工具、输出的格式和注意事项。",
+  "写成下次换个主题也能用的通用做法，不写这次的具体文件名、数字和结论。只输出 SKILL.md 的内容。",
+].join("\n");
+
+/** Asks the agent's model to write a SKILL.md from one reply: the request, the steps it took, and the answer. */
+export async function draftSkill(messageId: string, signal: AbortSignal): Promise<Skill> {
+  const { messages, agents, providers, defaultModel } = useData.getState();
+  const at = messages.findIndex((m) => m.id === messageId);
+  const reply = messages[at];
+  if (reply?.kind !== "text") throw new Error("找不到这条回复");
+  const agent = agents.find((a) => a.id === reply.sender);
+  const target = resolveModel(agent, providers, defaultModel);
+  if (!agent || !target) throw new Error("还没有连接模型服务");
+  const asked = messages
+    .slice(0, at)
+    .findLast((m): m is TextMessage => m.chat === reply.chat && m.kind === "text" && m.sender === "me");
+  const steps = (reply.tools ?? []).map((t) => `- ${t.name}：${t.label}`).join("\n");
+  const todos = (reply.todos ?? []).map((t) => `- ${t.text}`).join("\n");
+  const material = [
+    `用户的请求：${asked?.text || "（见回答）"}`,
+    steps && `用过的工具：\n${steps}`,
+    todos && `步骤清单：\n${todos}`,
+    `最后的回答（节选）：\n${reply.text.slice(0, 4000)}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const r = await completeText({
+    provider: target.provider,
+    modelId: target.modelId,
+    system: "你负责把做得好的任务沉淀成技能说明。",
+    messages: [{ role: "user", content: `${DRAFT_RULES}\n\n${material}` }],
+    params: { ...agent.params, temperature: 0.3 },
+    signal,
+  });
+  const text = r.text
+    .replace(/<think>[\s\S]*?<\/think>/g, "")
+    .trim()
+    .replace(/^```[\w-]*\n([\s\S]*?)\n```$/, "$1");
+  return parseSkill(text, "") ?? { id: crypto.randomUUID(), name: "", description: "", body: text, enabled: true };
 }

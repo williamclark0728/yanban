@@ -1,8 +1,11 @@
 import clsx from "clsx";
-import { AlertCircle, Archive, Brain, Check, CheckCircle2, ChevronDown, Circle, CircleDot, Copy, FileDown, FilePen, ListTodo, Loader2, MessageSquarePlus, Play, RotateCcw, RotateCw, Square, Undo2 } from "lucide-react";
-import { useState } from "react";
+import { AlertCircle, Archive, BookPlus, Brain, Check, CheckCircle2, ChevronDown, Circle, CircleDot, Copy, CornerDownRight, FileDown, FilePen, ListTodo, Loader2, MessageSquarePlus, Play, RotateCcw, RotateCw, Sparkles, Square, Undo2 } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
+import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import "katex/dist/katex.min.css";
 import { RUN_PLAN, setPlanMode } from "../lib/agentTools";
 import { retry, useBusy } from "../lib/chat";
 import { send } from "../lib/queue";
@@ -14,6 +17,7 @@ import type { Agent, Issue, Message, Todo, ToolTrace, Usage, Verdict } from "../
 import { BotAvatar, palette } from "./Avatar";
 import { FileCard } from "./FileCard";
 import { MadeFiles } from "./MadeFiles";
+import { SaveSkill } from "./SaveSkill";
 import { citations, ToolSteps } from "./ToolSteps";
 
 function withMentions(text: string, agents: Agent[]) {
@@ -24,6 +28,21 @@ function withMentions(text: string, agents: Agent[]) {
     const id = agents.find((a) => a.name === name)?.id ?? "me";
     return `[@${name}](mention:${id})`;
   });
+}
+
+/**
+ * Models write formulas as `\( … \)` and `\[ … \]` as often as `$ … $`; turn the first two into dollar signs
+ * so they render too. Code blocks and inline code are left alone.
+ */
+function withMath(text: string) {
+  return text
+    .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
+    .map((part, i) =>
+      i % 2
+        ? part
+        : part.replace(/\\\[([\s\S]+?)\\\]/g, (_, m: string) => `\n$$\n${m.trim()}\n$$\n`).replace(/\\\(([\s\S]+?)\\\)/g, (_, m: string) => `$${m.trim()}$`),
+    )
+    .join("");
 }
 
 /** `[3]` after a web search becomes a link to that source. */
@@ -39,7 +58,8 @@ export function RichText({ text, agents, cites }: { text: string; agents: Agent[
   return (
     <div className="prose-chat">
       <Markdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
         urlTransform={(url) => url}
         components={{
           a: ({ href, children }) => {
@@ -75,7 +95,7 @@ export function RichText({ text, agents, cites }: { text: string; agents: Agent[
           },
         }}
       >
-        {withCitations(withMentions(text, agents), cites)}
+        {withCitations(withMentions(withMath(text), agents), cites)}
       </Markdown>
     </div>
   );
@@ -144,7 +164,23 @@ function WordButton({ text, name }: { text: string; name: string }) {
   );
 }
 
-function Meta({ time, usage, note, copy, name, align }: { time: string; usage?: Usage; note?: string; copy?: string; name?: string; align: "left" | "right" }) {
+function Meta({
+  time,
+  usage,
+  note,
+  copy,
+  name,
+  align,
+  extra,
+}: {
+  time: string;
+  usage?: Usage;
+  note?: string;
+  copy?: string;
+  name?: string;
+  align: "left" | "right";
+  extra?: ReactNode;
+}) {
   const dev = usePrefs((s) => s.mode === "dev");
   return (
     <div
@@ -163,6 +199,7 @@ function Meta({ time, usage, note, copy, name, align }: { time: string; usage?: 
       )}
       {copy && <CopyButton text={copy} />}
       {copy && name && <WordButton text={copy} name={name} />}
+      {extra}
     </div>
   );
 }
@@ -202,7 +239,7 @@ function Failure({ msg }: { msg: Extract<Message, { kind: "text" }> }) {
       </div>
       {dev && msg.error?.detail && <div className="mt-1 break-all font-mono text-xs text-fg-2">{msg.error.detail}</div>}
       <div className="mt-2 flex gap-2 empty:hidden">
-        {msg.chat === msg.sender && !msg.summary && (
+        {msg.chat === msg.sender && !msg.summary && !msg.compare && (
           <button
             type="button"
             onClick={() => retry(msg.id)}
@@ -315,6 +352,46 @@ function RunPlan({ chat }: { chat: string }) {
   );
 }
 
+/** A reply worth repeating: several tool steps or a step list. */
+const complex = (msg: Extract<Message, { kind: "text" }>) => (msg.tools?.length ?? 0) >= 3 || (msg.todos?.length ?? 0) >= 3;
+
+function SkillButton({ messageId, children, className }: { messageId: string; children: ReactNode; className: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" title="把这次的做法存成技能，以后同类任务照着做" onClick={() => setOpen(true)} className={className}>
+        {children}
+      </button>
+      {open && <SaveSkill messageId={messageId} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+const chip = "flex h-8 items-center gap-1.5 rounded-full border border-line bg-raise px-3 text-[13px] hover:bg-hover";
+
+/** Under the latest private reply: what the user will likely want next, and saving the method as a skill. */
+function NextSteps({ msg }: { msg: Extract<Message, { kind: "text" }> }) {
+  const busy = useBusy((s) => !!s[msg.chat]);
+  const next = msg.next ?? [];
+  if (busy || (!next.length && !complex(msg))) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {next.map((n) => (
+        <button key={n} type="button" onClick={() => send(msg.chat, n)} className={chip}>
+          <Sparkles size={13} className="shrink-0 text-accent-text" />
+          {n}
+        </button>
+      ))}
+      {complex(msg) && (
+        <SkillButton messageId={msg.id} className={chip}>
+          <BookPlus size={13} className="shrink-0 text-fg-2" />
+          存成技能
+        </SkillButton>
+      )}
+    </div>
+  );
+}
+
 /** Where the chat was compressed: later replies see this summary instead of the messages above it. */
 function Summary({ msg, agents }: { msg: Extract<Message, { kind: "text" }>; agents: Agent[] }) {
   if (msg.reset) {
@@ -359,12 +436,15 @@ export function MessageItem({
   inGroup,
   first,
   last,
+  column,
 }: {
   msg: Message;
   agents: Agent[];
   inGroup: boolean;
   first: boolean;
   last: boolean;
+  /** One answer of a side-by-side comparison: full width, no follow-up buttons. */
+  column?: boolean;
 }) {
   const showPanel = useUi((s) => s.showPanel);
   const isLatest = useData((s) => s.messages.findLast((m) => m.chat === msg.chat)?.id === msg.id);
@@ -428,11 +508,11 @@ export function MessageItem({
   const hasBody = !!msg.text || !!reasoning || !!tools || streaming;
 
   return (
-    <div className={clsx("group flex items-end gap-2.5", first ? "mt-4" : "mt-1")}>
+    <div className={clsx("group flex items-end gap-2.5", !column && (first ? "mt-4" : "mt-1"))}>
       {inGroup && (
         <div className="w-8 shrink-0 self-end pb-6">{last && agent && <BotAvatar agent={agent} size={32} />}</div>
       )}
-      <div className="flex min-w-0 max-w-[min(680px,85%)] flex-col">
+      <div className={clsx("flex min-w-0 flex-col", column ? "w-full" : "max-w-[min(680px,85%)]")}>
         {inGroup && first && (
           <span className="mb-1 ml-3 text-[13px] font-medium" style={{ color: agent ? palette[agent.color].text : "var(--text-3)" }}>
             {agent?.name ?? "已删除的成员"}
@@ -442,6 +522,13 @@ export function MessageItem({
           <div className="rounded-[20px] bg-bubble px-4 py-2.5" data-reply={msg.text && !streaming ? msg.id : undefined}>
             {reasoning && <Reasoning text={reasoning} live={streaming && !msg.text} />}
             {msg.kind === "text" && msg.todos?.length ? <Todos todos={msg.todos} /> : null}
+            {msg.kind === "text" &&
+              msg.steers?.map((s, i) => (
+                <div key={i} className="mb-2 flex items-start gap-1.5 rounded-xl bg-accent-soft px-3 py-1.5 text-[13px] text-accent-text">
+                  <CornerDownRight size={13} className="mt-[3px] shrink-0" />
+                  <span className="min-w-0 whitespace-pre-wrap">你在回复中插入：{s}</span>
+                </div>
+              ))}
             {tools && <ToolSteps steps={tools} messageId={msg.id} />}
             {msg.text ? <RichText text={msg.text} agents={agents} cites={citations(tools)} /> : streaming && !reasoning && <Typing />}
             {msg.kind === "review" && (
@@ -454,6 +541,7 @@ export function MessageItem({
         {msg.kind === "text" && msg.files?.length ? <MadeFiles files={msg.files} /> : null}
         {tools && !streaming && <Changes messageId={msg.id} tools={tools} />}
         {msg.kind === "text" && msg.plan && !streaming && !failed && isLatest && <RunPlan chat={msg.chat} />}
+        {msg.kind === "text" && !inGroup && !column && !streaming && !failed && isLatest && <NextSteps msg={msg} />}
         {failed && <Failure msg={msg} />}
         {!streaming && (
           <Meta
@@ -463,6 +551,13 @@ export function MessageItem({
             copy={msg.text || undefined}
             name={msg.kind === "text" ? (agent?.name ?? "回复") : undefined}
             align="left"
+            extra={
+              msg.kind === "text" && !inGroup && !isLatest && !failed && complex(msg) ? (
+                <SkillButton messageId={msg.id} className="flex items-center gap-1 hover:text-fg">
+                  <BookPlus size={12} /> 存成技能
+                </SkillButton>
+              ) : undefined
+            }
           />
         )}
       </div>

@@ -1,19 +1,19 @@
 import clsx from "clsx";
-import { BookOpen, ChartColumn, CheckCircle2, ChevronLeft, Download, ExternalLink, Eye, EyeOff, Globe, Loader2, Plug, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
+import { Bookmark, BookOpen, ChartColumn, CheckCircle2, ChevronLeft, Download, ExternalLink, Eye, EyeOff, Globe, Loader2, Minus, Plug, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { protocols } from "../lib/catalog";
 import { DESKTOP_DOWNLOAD, DESKTOP_RELEASES, isDesktop } from "../lib/desktop";
 import { describeError, listModels, testProvider } from "../lib/llm";
-import { isReady, resolveModel, TRIAL_ID, useData, usePrefs, useUi, type SettingsTab } from "../store";
+import { isReady, resolveModel, stepZoom, TRIAL_ID, useData, usePrefs, useUi, ZOOM_MAX, ZOOM_MIN, type SettingsTab } from "../store";
 import type { Provider, SearchConfig } from "../types";
 import { searchProviders, searchReady, webSearch } from "../lib/search";
 import { seedAgents, seedGroups } from "../lib/seed";
 import { MeAvatar } from "./Avatar";
-import { ConfigRow, McpSettings, SkillSettings } from "./Extensions";
+import { ConfigRow, McpSettings, MemorySettings, SkillSettings } from "./Extensions";
 import { VersionRow } from "./UpdateCard";
 import { UsagePanel } from "./UsagePanel";
 import { ModelPicker } from "./ModelPicker";
-import { IconButton, Segmented } from "./ui";
+import { IconButton, Segmented, Switch } from "./ui";
 
 export function SettingsDialog() {
   const { settingsOpen, settingsTab, openSettings, closeSettings } = useUi();
@@ -35,6 +35,7 @@ export function SettingsDialog() {
     { value: "search", label: "联网搜索", icon: <Globe size={17} /> },
     { value: "skills", label: "技能", icon: <BookOpen size={17} /> },
     { value: "mcp", label: "MCP", icon: <Plug size={17} /> },
+    { value: "memory", label: "记忆", icon: <Bookmark size={17} /> },
     { value: "usage", label: "用量", icon: <ChartColumn size={17} /> },
   ];
 
@@ -87,6 +88,7 @@ export function SettingsDialog() {
             {settingsTab === "search" && <SearchSettings />}
             {settingsTab === "skills" && <SkillSettings />}
             {settingsTab === "mcp" && <McpSettings />}
+            {settingsTab === "memory" && <MemorySettings />}
             {settingsTab === "usage" && <UsagePanel />}
           </div>
         </section>
@@ -108,7 +110,7 @@ export function Row({ title, desc, children }: { title: string; desc?: string; c
 }
 
 function General() {
-  const { mode, setMode, theme, setTheme, name, setName, approval, setApproval, fontSize, steps, queue, set } = usePrefs();
+  const { mode, setMode, theme, setTheme, name, setName, approval, setApproval, fontSize, steps, zoom, suggest, set } = usePrefs();
   const setHelp = useUi((s) => s.setHelp);
   const { agents, groups, restoreExamples } = useData();
   const [restoring, setRestoring] = useState(false);
@@ -150,7 +152,7 @@ function General() {
           ]}
         />
       </Row>
-      <Row title="消息字号">
+      <Row title="消息字号" desc="13 / 15 / 18 / 21 像素">
         <Segmented
           value={fontSize}
           onChange={(fontSize) => set({ fontSize })}
@@ -158,8 +160,24 @@ function General() {
             { value: "small", label: "小" },
             { value: "medium", label: "中" },
             { value: "large", label: "大" },
+            { value: "xlarge", label: "特大" },
           ]}
         />
+      </Row>
+      <Row title="界面缩放" desc={isDesktop ? "整个窗口一起放大缩小；快捷键 Ctrl + 加号 / 减号，Ctrl + 0 还原" : "网页版用浏览器自带的缩放：Ctrl + 加号 / 减号，Ctrl + 0 还原"}>
+        {isDesktop ? (
+          <div className="flex items-center gap-1">
+            <IconButton aria-label="缩小" disabled={zoom <= ZOOM_MIN} onClick={() => set({ zoom: stepZoom(zoom, -1) })} className="disabled:opacity-30">
+              <Minus size={16} />
+            </IconButton>
+            <button type="button" title="还原到 100%" onClick={() => set({ zoom: 1 })} className="h-9 w-16 rounded-full text-sm font-medium tabular-nums hover:bg-hover">
+              {Math.round(zoom * 100)}%
+            </button>
+            <IconButton aria-label="放大" disabled={zoom >= ZOOM_MAX} onClick={() => set({ zoom: stepZoom(zoom, 1) })} className="disabled:opacity-30">
+              <Plus size={16} />
+            </IconButton>
+          </div>
+        ) : null}
       </Row>
       <Row title="工具步骤" desc={steps === "full" ? "回复里列出每一步（搜索、读文件、运行命令）" : "折叠成一行，点开再看；需要你审批的步骤照常显示"}>
         <Segmented
@@ -171,15 +189,8 @@ function General() {
           ]}
         />
       </Row>
-      <Row title="回复时发消息" desc={queue ? "排队，等这条回复完成后自动发出" : "等回复完成后才能发"}>
-        <Segmented
-          value={queue ? "queue" : "wait"}
-          onChange={(v) => set({ queue: v === "queue" })}
-          options={[
-            { value: "queue", label: "排队" },
-            { value: "wait", label: "不能发" },
-          ]}
-        />
+      <Row title="回答后的建议" desc={suggest ? "私聊回答下方给出两三个接下来可以做的事，点一下就发出" : "不显示"}>
+        <Switch checked={suggest} onChange={(v) => set({ suggest: v })} label="回答后的建议" />
       </Row>
       <Row title="快捷键和命令" desc="输入 / 用命令，$ 选技能，@ 选成员或文件；选中回答里的文字可以引用或讲解">
         <button type="button" onClick={() => setHelp(true)} className="h-10 rounded-full border border-line-2 px-5 text-sm font-medium hover:bg-hover">

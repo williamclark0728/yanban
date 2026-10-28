@@ -1,15 +1,16 @@
 import clsx from "clsx";
-import { ChevronLeft, ClipboardList, Clock, FileUp, Lightbulb, PanelRight, PlugZap, Quote, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronUp, ClipboardList, Clock, CornerDownRight, FileUp, Lightbulb, PanelRight, Pencil, PlugZap, Quote, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { setPlanMode, usePlanMode } from "../lib/agentTools";
 import { compact, newTopic, stop, useBusy } from "../lib/chat";
 import { isDesktop } from "../lib/desktop";
 import { exportChat } from "../lib/export";
-import { send as sendOrQueue, unqueue, useQueue } from "../lib/queue";
+import { moveQueued, queue, send as sendNowOrInsert, unqueue, unsteer, useQueue, useSteer } from "../lib/queue";
 import { dayLabel, sameDay } from "../lib/time";
 import { resolveModel, useData, usePrefs, useUi } from "../store";
-import type { Attachment, Message } from "../types";
+import type { Attachment, Message, TextMessage } from "../types";
 import { BotAvatar, GroupAvatar } from "./Avatar";
+import { CompareChip, CompareRow } from "./Compare";
 import { Composer, type Command, type ComposerHandle } from "./Composer";
 import { ContextMeter, EffortChip } from "./ContextMeter";
 import { MessageItem } from "./MessageItem";
@@ -81,16 +82,18 @@ function PlanChip({ chat }: { chat: string }) {
 
 export function ChatView() {
   const { agents, groups, messages, providers, defaultModel, markRead, updateAgent, skills } = useData();
-  const { active, back, togglePanel, panelOpen, openSettings, openAside, setChip, setHelp } = useUi();
+  const { active, back, togglePanel, panelOpen, openSettings, openAside, setChip, setHelp, focus, quote, focusMessage, quoteInto } = useUi();
   const dev = usePrefs((s) => s.mode === "dev");
-  const canQueue = usePrefs((s) => s.queue);
   const busy = useBusy((s) => (active ? !!s[active.id] : false));
   const planOn = usePlanMode((s) => (active ? !!s[active.id] : false));
   const queued = useQueue((s) => (active ? s[active.id] : undefined));
+  const inserted = useSteer((s) => (active ? s[active.id] : undefined));
   const scroller = useRef<HTMLDivElement>(null);
   const composer = useRef<ComposerHandle>(null);
   const [dragging, setDragging] = useState(false);
   const [picked, setPicked] = useState<Picked | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
+  const flashTimer = useRef(0);
   const stick = useRef(true);
 
   // Selecting text in a reply shows the quote / explain toolbar.
@@ -141,6 +144,25 @@ export function ChatView() {
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [chatId, list.length, tailSize]);
 
+  // A message picked in the history search: scroll to it and light it up for a moment.
+  useEffect(() => {
+    const el = focus && document.getElementById(`msg-${focus.id}`);
+    if (!focus || !el) return;
+    stick.current = false;
+    el.scrollIntoView({ block: "center" });
+    setFlash(focus.id);
+    focusMessage(null);
+    clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setFlash(null), 1800);
+  }, [focus, chatId, list.length, focusMessage]);
+
+  // An old message quoted from the history search goes into this chat's composer.
+  useEffect(() => {
+    if (!quote) return;
+    composer.current?.quote(quote.text);
+    quoteInto(null);
+  }, [quote, quoteInto]);
+
   if (!active || (!group && !agent)) {
     return (
       <main className="hidden flex-1 place-items-center bg-bg md:grid">
@@ -154,7 +176,8 @@ export function ChatView() {
 
   const name = group?.name ?? agent!.name;
 
-  const send = (text: string, files: Attachment[]) => sendOrQueue(chatId, text, files.length ? files : undefined);
+  const send = (text: string, files: Attachment[], toQueue?: boolean) =>
+    (toQueue ? queue : sendNowOrInsert)(chatId, text, files.length ? files : undefined);
 
   const commands: Command[] = [
     { name: "compact", label: "压缩上下文", hint: "把之前的对话写成摘要", run: () => void compact(chatId) },
@@ -168,6 +191,7 @@ export function ChatView() {
             run: () => setPlanMode(chatId, !planOn),
           },
           { name: "model", label: "换模型", run: () => setChip("model") },
+          { name: "compare", label: "多模型对比", hint: "选 2–3 个模型同时回答", run: () => setChip("compare") },
           { name: "effort", label: "思考强度", run: () => setChip("effort") },
           { name: "web", label: agent.web ? "关闭联网" : "打开联网", hint: `现在${agent.web ? "开着" : "关着"}`, run: () => updateAgent(agent.id, { web: !agent.web }) },
         ]
@@ -251,13 +275,25 @@ export function ChatView() {
             const next = list[i + 1];
             const s = senderOf(m);
             const newDay = !prev || !sameDay(prev.at, m.at);
+            const day = newDay && (
+              <div className="my-5 flex justify-center">
+                <span className="rounded-full bg-raise-2 px-3 py-1 text-xs font-medium text-fg-2">{dayLabel(m.at)}</span>
+              </div>
+            );
+            // Answers from several models to one question sit side by side, drawn once at the first of them.
+            if (m.kind === "text" && m.compare) {
+              if (list.findIndex((x) => x.kind === "text" && x.compare === m.compare) !== i) return null;
+              const replies = list.filter((x): x is TextMessage => x.kind === "text" && x.compare === m.compare);
+              return (
+                <div key={m.id} className={clsx("rounded-2xl transition-colors duration-700", replies.some((r) => r.id === flash) && "bg-accent-soft")}>
+                  {day}
+                  <CompareRow replies={replies} agents={agents} />
+                </div>
+              );
+            }
             return (
-              <div key={m.id} id={`msg-${m.id}`} className="rounded-2xl">
-                {newDay && (
-                  <div className="my-5 flex justify-center">
-                    <span className="rounded-full bg-raise-2 px-3 py-1 text-xs font-medium text-fg-2">{dayLabel(m.at)}</span>
-                  </div>
-                )}
+              <div key={m.id} id={`msg-${m.id}`} className={clsx("rounded-2xl transition-colors duration-700", flash === m.id && "bg-accent-soft")}>
+                {day}
                 <MessageItem
                   msg={m}
                   agents={agents}
@@ -286,16 +322,49 @@ export function ChatView() {
           </button>
         )}
         {group && <TaskBoard group={group.id} />}
-        {queued && queued.length > 0 && (
+        {inserted && inserted.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5 px-1">
-            {queued.map((q) => (
-              <span key={q.id} className="flex max-w-full items-center gap-1.5 rounded-full border border-line bg-raise py-1 pl-2.5 pr-1.5 text-[12.5px] text-fg-2">
-                <Clock size={12} className="shrink-0" />
-                <span className="truncate">排队中：{q.text || `${q.attachments?.length ?? 0} 个附件`}</span>
-                <button type="button" aria-label="取消这条" onClick={() => unqueue(chatId, q.id)} className="shrink-0 text-fg-3 hover:text-fg">
+            {inserted.map((q) => (
+              <span key={q.id} className="flex max-w-full items-center gap-1.5 rounded-full border border-accent/40 bg-accent-soft py-1 pl-2.5 pr-1.5 text-[12.5px] text-accent-text">
+                <CornerDownRight size={12} className="shrink-0" />
+                <span className="truncate">插入中，下一步送达：{q.text || `${q.attachments?.length ?? 0} 个附件`}</span>
+                <button type="button" aria-label="撤回这条" onClick={() => unsteer(chatId, q.id)} className="shrink-0 opacity-70 hover:opacity-100">
                   <X size={13} />
                 </button>
               </span>
+            ))}
+          </div>
+        )}
+        {queued && queued.length > 0 && (
+          <div className="mb-2 space-y-1 rounded-2xl border border-line bg-raise p-1.5 shadow-[var(--shadow)]">
+            <div className="flex items-center gap-1.5 px-1.5 pt-0.5 text-[12px] text-fg-3">
+              <Clock size={12} /> 排队中（{queued.length}），这条回复完成后按顺序发出
+            </div>
+            {queued.map((q, i) => (
+              <div key={q.id} className="group/q flex items-center gap-1 rounded-xl px-1.5 py-1 text-[13px] hover:bg-hover">
+                <span className="w-4 shrink-0 text-center text-[11.5px] text-fg-3">{i + 1}</span>
+                <span className="min-w-0 flex-1 truncate">{q.text || `${q.attachments?.length ?? 0} 个附件`}</span>
+                <IconButton aria-label="上移" disabled={i === 0} onClick={() => moveQueued(chatId, q.id, -1)} className="size-6 disabled:opacity-30">
+                  <ChevronUp size={14} />
+                </IconButton>
+                <IconButton aria-label="下移" disabled={i === queued.length - 1} onClick={() => moveQueued(chatId, q.id, 1)} className="size-6 disabled:opacity-30">
+                  <ChevronDown size={14} />
+                </IconButton>
+                <IconButton
+                  aria-label="编辑"
+                  title="放回输入框修改"
+                  onClick={() => {
+                    unqueue(chatId, q.id);
+                    composer.current?.restore(q.text, q.attachments);
+                  }}
+                  className="size-6"
+                >
+                  <Pencil size={13} />
+                </IconButton>
+                <IconButton aria-label="撤回" onClick={() => unqueue(chatId, q.id)} className="size-6">
+                  <X size={14} />
+                </IconButton>
+              </div>
             ))}
           </div>
         )}
@@ -305,7 +374,7 @@ export function ChatView() {
           placeholder={group ? `发消息给 ${name}，@ 指定成员，/ 命令，$ 技能` : `发消息给 ${name}，/ 命令，$ 技能`}
           members={members}
           busy={busy}
-          canQueue={canQueue}
+          canQueue
           commands={commands}
           skills={skills.filter((s) => s.enabled)}
           workspace={isDesktop ? (agent?.workspace ?? group?.workspace) : undefined}
@@ -315,6 +384,7 @@ export function ChatView() {
                 <ModelChip agent={agent} />
                 <EffortChip agent={agent} />
                 <PlanChip chat={agent.id} />
+                <CompareChip agent={agent} />
               </>
             )
           }

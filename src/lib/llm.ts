@@ -274,6 +274,8 @@ interface CallOptions {
   search?: boolean;
   /** Web pages the model cited, for services that report them (Gemini). */
   onSources?: (sources: Source[]) => void;
+  /** Messages the user sent while this reply runs; the model reads them before its next step. */
+  steer?: () => string[];
 }
 
 /** Tool steps one reply may take. Work-mode tasks (read a skill, look around, write files) need many. */
@@ -330,6 +332,15 @@ function settings(opts: CallOptions, withTools: boolean, streaming: boolean) {
     abortSignal: opts.signal,
     maxRetries: 1,
     ...(withTools && opts.tools ? { tools: opts.tools, stopWhen: isStepCount(opts.maxSteps ?? MAX_STEPS) } : {}),
+    // Added messages carry forward to the later steps of the reply.
+    ...(withTools && opts.tools && opts.steer
+      ? {
+          prepareStep: ({ messages }: { messages: ModelMessage[] }) => {
+            const added = opts.steer!();
+            return added.length ? { messages: [...messages, ...added.map((text) => ({ role: "user" as const, content: text }))] } : {};
+          },
+        }
+      : {}),
   };
 }
 

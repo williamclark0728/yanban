@@ -10,6 +10,7 @@ import type { Report } from "./tools";
 export const AGENT_RULES = [
   "多步骤的任务（三步以上）先用 update_todos 列出步骤，开始做哪一步就把它标成 in_progress，做完标成 done；简单问答不用列。",
   "拿不准用户要什么、而且猜错代价大时，用 ask_user 问用户，给出 2–4 个选项；能自己判断的不要问，一次只问一个问题。",
+  "做完一个多步骤、以后可能还会重复做的任务（比如按固定格式整理材料、写某类报告），结尾用一句话提议把这次的做法存成技能，用户点回复下方的「存成技能」就能保存。",
 ].join("\n");
 
 // ---------- step list ----------
@@ -103,7 +104,7 @@ export const usePlanMode = create<Record<string, boolean>>(() => ({}));
 export const setPlanMode = (chat: string, on: boolean) => usePlanMode.setState({ [chat]: on });
 
 /** Tools that only look; plan mode keeps these and drops everything that changes files, sends or installs. */
-const READ_ONLY = new Set(["web_search", "read_page", "list_dir", "read_file", "search_files", "use_skill", "read_skill_file", "ask_user", "update_todos"]);
+const READ_ONLY = new Set(["web_search", "read_page", "list_dir", "read_file", "search_files", "use_skill", "read_skill_file", "ask_user", "update_todos", "remember", "search_chats"]);
 
 export const readOnly = (tools: ToolSet): ToolSet => Object.fromEntries(Object.entries(tools).filter(([name]) => READ_ONLY.has(name)));
 
@@ -131,6 +132,8 @@ const MAY_WAIT = new Set([
   "use_skill",
   "read_skill_file",
   "update_todos",
+  "remember",
+  "search_chats",
 ]);
 const TIMEOUT_MS = 90_000;
 const REPEAT_LIMIT = 3;

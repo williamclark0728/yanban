@@ -1,7 +1,7 @@
 import type { ImagePart, ModelMessage, ToolSet, UserContent } from "ai";
 import { create } from "zustand";
 import { resolveModel, useData, usePrefs } from "../store";
-import type { Agent, Attachment, Group, Issue, Message, TextMessage } from "../types";
+import type { Agent, Attachment, Group, Issue, Message, ModelRef, TextMessage } from "../types";
 import { AUTO_COMPACT, contextWindow, estimateTokens, sinceSummary, SUMMARY_PROMPT, TOOL_OVERHEAD } from "./context";
 import { attachmentText, hasImages } from "./files";
 import { dispatchRules, dispatchTools } from "./collab";
@@ -12,6 +12,9 @@ import { FILE_RULES, fileTools, filesText } from "./outputs";
 import { skillRules, skillTools } from "./skills";
 import { workRules, workTools } from "./workmode";
 import { AGENT_RULES, askTool, guard, PLAN_RULES, readOnly, todoTool, usePlanMode } from "./agentTools";
+import { requeueSteers, takeSteers } from "./inbox";
+import { NEXT_RULES, splitNext, useCompare, withoutAlternatives } from "./compare";
+import { MEMORY_RULES, memoryLines, memoryTools } from "./memory";
 import { NATIVE_WEB_RULES, NO_WEB_RULES, tracer, WEB_RULES, webAccess, webPlan, type Report } from "./tools";
 
 /** Chats with work in flight. One run per chat; stopping a chat aborts all of its replies. */
@@ -48,7 +51,8 @@ export function systemPrompt(agent: Agent) {
   ].filter(Boolean) as string[];
   const me = usePrefs.getState().name.trim();
   if (me) lines.push(`用户的称呼：${me}`);
-  if (agent.memory.length) lines.push("", "关于用户你已经知道：", ...agent.memory.map((m) => `- ${m}`));
+  const memory = memoryLines(agent);
+  if (memory.length) lines.push("", "关于用户你已经知道：", ...memory.map((m) => `- ${m}`));
   const web = webPlan(agent);
   if (web) lines.push("", web === "tools" ? WEB_RULES : NATIVE_WEB_RULES);
   else if (agent.web) lines.push("", NO_WEB_RULES);
@@ -84,7 +88,7 @@ export function planSystem(lead: Agent, group: Group, members: Agent[]) {
     "1. 需要实际工作（写作、调研、分析、核查等）：拆成具体任务派给合适的成员，可以只派给部分成员，每人一条。",
     "   每条任务标明类型：produce 表示产出（写稿、调研、分析、写代码），review 表示审查别人的产出（核对事实和数字、检查逻辑措辞）。",
     "   需要准确性的成果，至少安排一名 produce 和一名 review；审查成员不产出，会在产出完成后检查并提出疑点，作者据此修订。",
-    "   produce 默认同时开始。如果某人要用到另一人的产出（比如先搜集资料、再据此写稿），把前者排在前面，在后者的任务里写 after: 前者的名字，后者会等前者完成再开始。没有先后关系的不写 after。",
+    "   produce 默认同时开始。如果某人要用到别人的产出（比如先搜集资料、再据此写稿），把前者排在前面，在后者的任务里写 after: 前者的名字（要等几个人就写几个名字，用顿号隔开），后者会等他们都完成再开始。没有先后关系的不写 after。",
     "   mode 写 work。",
     "2. 要成员各自发言（自我介绍、各自说看法、轮流回答同一个问题）：给每位被点到的成员（说“大家”“每个人”就是全部成员）各派一条 produce 任务，task 写清要说什么、说多长；不安排 review。mode 写 speak。",
     "3. 打招呼、简单问答、问你自己的事：不分工，自己在 reply 里完整回答。mode 写 answer。",
@@ -93,6 +97,7 @@ export function planSystem(lead: Agent, group: Group, members: Agent[]) {
     '{"reply": "你作为主持人自己说的话", "mode": "work 或 speak 或 answer", "assignments": [{"member": "成员名", "type": "produce 或 review", "task": "具体任务", "after": "要等的成员名，没有就省略"}]}',
     "- reply 是你自己的发言，不要照抄或复述用户的消息。分工时是一两句回应（比如说明怎么安排）；不分工时是给用户的完整回答。",
     "- 不分工时 assignments 为空数组。",
+    ...(group.guide ? ["", `本群的工作流程（需要实际工作时照这个分工）：\n${group.guide}`] : []),
     "",
     `示例（用户：大家好，自我介绍一下）：`,
     JSON.stringify({
@@ -129,13 +134,15 @@ export const userContent = (text: string, images: ImagePart[]): ModelMessage["co
 
 /** The last `limit` finished turns of a private chat since its latest summary, oldest first. */
 export function privateHistory(messages: Message[], chat: string, limit: number): ModelMessage[] {
-  const recent = sinceSummary(messages.filter((m) => m.chat === chat))
+  const recent = sinceSummary(withoutAlternatives(messages.filter((m) => m.chat === chat)))
     .rest.filter((m): m is TextMessage => m.kind === "text" && !m.summary && m.status !== "error" && m.status !== "streaming" && (!!m.text || !!m.attachments?.length))
     .slice(-limit);
   const lastUser = recent.findLastIndex((m) => m.sender === "me");
+  // What the user added while a reply was running belongs with the request it answered.
+  const added = (m?: TextMessage) => (m?.steers?.length ? `\n\n（回复过程中用户又补充：${m.steers.join("；")}）` : "");
   const turns = recent.map<ModelMessage>((m, i) =>
     m.sender === "me"
-      ? { role: "user", content: userContent(withFiles(m), i === lastUser ? latestImages([m]) : []) }
+      ? { role: "user", content: userContent(withFiles(m) + added(recent.slice(i + 1).find((x) => x.sender !== "me")), i === lastUser ? latestImages([m]) : []) }
       : { role: "assistant", content: [m.text, filesText(m.files)].filter(Boolean).join("\n\n") },
   );
   while (turns[0]?.role === "assistant") turns.shift();
@@ -199,31 +206,50 @@ export async function speak(opts: {
   extraTools?: (report: Report) => ToolSet;
   /** Plan mode: only tools that look, and a plan at the end instead of changes. */
   plan?: boolean;
+  /** Private chats: messages the user inserts while this reply runs reach the model before its next step. */
+  steer?: boolean;
+  /** Private chats: the reply may end with suggested next steps. */
+  suggest?: boolean;
+  /** One of several models answering the same question side by side: the set's id and this model. */
+  compare?: { id: string; model: ModelRef };
 }): Promise<Spoken> {
   const { providers, defaultModel, addMessage, patchMessage } = useData.getState();
   const id = uid();
-  addMessage({ id, chat: opts.chat, kind: "text", sender: opts.agent.id, text: "", status: "streaming", at: Date.now(), plan: opts.plan || undefined });
+  const agent = opts.compare ? { ...opts.agent, model: opts.compare.model } : opts.agent;
+  addMessage({
+    id,
+    chat: opts.chat,
+    kind: "text",
+    sender: opts.agent.id,
+    text: "",
+    status: "streaming",
+    at: Date.now(),
+    plan: opts.plan || undefined,
+    compare: opts.compare?.id,
+    model: opts.compare?.model.id,
+  });
 
-  const target = resolveModel(opts.agent, providers, defaultModel);
+  const target = resolveModel(agent, providers, defaultModel);
   if (!target) {
     patchMessage(id, { status: "error", error: { message: "还没有连接模型服务" } }, true);
     return { ok: false, text: "", tokens: 0, messageId: id };
   }
 
   const { report, halt, settle } = tracer(id);
-  const web = webAccess(opts.agent, report);
+  const web = webAccess(agent, report);
   const all: ToolSet = {
     ...web.tools,
     ...todoTool(id),
     ...askTool(report),
-    ...fileTools(id, report, opts.agent),
-    ...skillTools(report, opts.agent),
-    ...workTools(opts.agent, report),
+    ...memoryTools(report, agent, id),
+    ...fileTools(id, report, agent),
+    ...skillTools(report, agent),
+    ...workTools(agent, report),
     ...(await mcpTools(report)),
     ...opts.extraTools?.(report),
   };
-  const tools = guard(opts.plan ? readOnly(all) : all, { agent: opts.agent, settle });
-  const work = await workRules(opts.agent);
+  const tools = guard(opts.plan ? readOnly(all) : all, { agent: agent, settle });
+  const work = await workRules(agent);
 
   let text = "";
   let reasoning = "";
@@ -231,7 +257,7 @@ export async function speak(opts: {
   let done = false;
   const flush = () => {
     queued = false;
-    if (!done) patchMessage(id, { text, reasoning: reasoning.trim() ? reasoning : undefined });
+    if (!done) patchMessage(id, { text: splitNext(text).text, reasoning: reasoning.trim() ? reasoning : undefined });
   };
   // Batch deltas; a timer keeps working when the window is in the background, unlike requestAnimationFrame.
   const schedule = () => {
@@ -245,13 +271,25 @@ export async function speak(opts: {
     const r = await streamReply({
       provider: target.provider,
       modelId: target.modelId,
-      system: [opts.system, FILE_RULES, skillRules(), work, AGENT_RULES, opts.plan && PLAN_RULES].filter(Boolean).join("\n\n"),
+      system: [opts.system, FILE_RULES, skillRules(), work, AGENT_RULES, MEMORY_RULES, opts.plan && PLAN_RULES, opts.suggest && usePrefs.getState().suggest && NEXT_RULES]
+        .filter(Boolean)
+        .join("\n\n"),
       messages: opts.messages,
-      params: opts.agent.params,
+      params: agent.params,
       signal: opts.signal,
       tools,
       search: web.search,
       onSources: web.onSources,
+      steer: opts.steer
+        ? () => {
+            const taken = takeSteers(opts.chat);
+            if (!taken.length) return [];
+            const msg = useData.getState().messages.find((m) => m.id === id);
+            const before = msg?.kind === "text" ? (msg.steers ?? []) : [];
+            patchMessage(id, { steers: [...before, ...taken.map((t) => t.shown)] }, true);
+            return taken.map((t) => `（用户在你回复过程中补充，接下来照这个调整）：${t.prompt}`);
+          }
+        : undefined,
       onText: (d) => {
         text += d;
         schedule();
@@ -262,15 +300,23 @@ export async function speak(opts: {
       },
     });
     done = true;
+    const final = splitNext(text);
     patchMessage(
       id,
-      { text, reasoning: reasoning.trim() ? reasoning : undefined, status: undefined, usage: { model: target.modelId, input: r.input, output: r.output, seconds: r.seconds } },
+      {
+        text: final.text,
+        next: opts.suggest ? final.next : undefined,
+        reasoning: reasoning.trim() ? reasoning : undefined,
+        status: undefined,
+        usage: { model: target.modelId, input: r.input, output: r.output, seconds: r.seconds },
+      },
       true,
     );
-    return { ok: true, text, tokens: r.input + r.output, messageId: id };
+    return { ok: true, text: final.text, tokens: r.input + r.output, messageId: id };
   } catch (e) {
     done = true;
     halt();
+    text = splitNext(text).text;
     if (opts.signal.aborted) patchMessage(id, { text, reasoning: reasoning.trim() ? reasoning : undefined, status: "stopped" }, true);
     else {
       const error = describeError(e);
@@ -302,16 +348,24 @@ export async function reply(agentId: string) {
     // A lead can hand work to the groups it runs, taking along the files from the user's latest message.
     const led = groups.filter((g) => g.leadId === agent.id);
     const asked = messages.findLast((m): m is TextMessage => m.chat === agentId && m.kind === "text" && m.sender === "me");
-    await speak({
+    const turn = {
       chat: agentId,
       agent,
       system: led.length ? `${base}\n\n${dispatchRules(led)}` : base,
       messages: context,
       signal: c.signal,
-      extraTools: led.length ? (report) => dispatchTools(agent, led, report, asked?.attachments) : undefined,
+      extraTools: led.length ? (report: Report) => dispatchTools(agent, led, report, asked?.attachments) : undefined,
       plan: !!usePlanMode.getState()[agentId],
-    });
+      suggest: true,
+    };
+    // Compare mode: every picked model answers the same context at once; the user picks one to carry on.
+    const models = useCompare.getState()[agentId] ?? [];
+    if (models.length >= 2) {
+      const set = uid();
+      await Promise.all(models.map((model) => speak({ ...turn, suggest: false, compare: { id: set, model } })));
+    } else await speak({ ...turn, steer: true });
   } finally {
+    requeueSteers(agentId);
     end(agentId);
   }
 }
@@ -357,7 +411,7 @@ export async function compact(chat: string) {
   if (!c) return false;
   const { agent, group } = who;
   const own = messages.filter((m) => m.chat === chat);
-  const { summary, rest } = sinceSummary(own);
+  const { summary, rest } = sinceSummary(withoutAlternatives(own));
   let text = group
     ? transcript(chat, 100_000)
     : [

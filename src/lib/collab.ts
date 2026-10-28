@@ -30,8 +30,8 @@ interface Assignment {
   agent: Agent;
   task: string;
   type: Kind;
-  /** A producer listed earlier whose output this one waits for and builds on. */
-  after?: Agent;
+  /** Producers listed earlier whose output this one waits for and builds on. */
+  after?: Agent[];
 }
 
 /** Mentioning this makes every member answer directly. */
@@ -71,14 +71,26 @@ function extractJson(raw: string): Record<string, unknown> | null {
 
 /**
  * Reads the lead's JSON plan; tolerant of code fences, extra prose and Chinese labels.
- * `after` only counts when it names a producer listed earlier, so waits can't form a loop.
+ * `after` names one or more producers ("甲、乙" or a list); only ones listed earlier count, so waits can't form a loop.
  */
 export function parsePlan(raw: string, members: Agent[]): { reply: string; speak: boolean; assignments: Assignment[] } | null {
   const data = extractJson(raw);
   if (!data) return null;
   const byName = (name: string) =>
     members.find((m) => m.name === name) ?? members.find((m) => name.includes(m.name) || m.name.includes(name));
-  const clean = (v: unknown) => String(v ?? "").replace(/^@/, "").trim();
+  const clean = (v: unknown) => (Array.isArray(v) ? v.join("、") : String(v ?? "")).replace(/@/g, "").trim();
+  // Every member named in an `after`, longest names first so "检索员甲" isn't read as some shorter name.
+  const named = (wait: string) => {
+    const found: Agent[] = [];
+    let rest = wait;
+    for (const m of [...members].sort((a, b) => b.name.length - a.name.length)) {
+      if (!rest.includes(m.name)) continue;
+      found.push(m);
+      rest = rest.split(m.name).join(" ");
+    }
+    const one = !found.length && wait ? byName(wait) : undefined;
+    return one ? [one] : found;
+  };
   const merged = new Map<string, Assignment & { wait: string }>();
   for (const a of Array.isArray(data.assignments) ? data.assignments : []) {
     const name = clean(a?.member);
@@ -91,9 +103,9 @@ export function parsePlan(raw: string, members: Agent[]): { reply: string; speak
   }
   const list = [...merged.values()];
   const assignments = list.map(({ wait, ...a }, i) => {
-    const before = wait && a.type === "produce" ? byName(wait) : undefined;
-    const ok = before && list.slice(0, i).some((x) => x.agent.id === before.id && x.type === "produce");
-    return ok ? { ...a, after: before } : a;
+    const before = wait && a.type === "produce" ? named(wait) : [];
+    const after = before.filter((b) => list.slice(0, i).some((x) => x.agent.id === b.id && x.type === "produce"));
+    return after.length ? { ...a, after } : a;
   });
   return { reply: typeof data.reply === "string" ? data.reply.trim() : "", speak: /speak|发言/i.test(String(data.mode ?? "")), assignments };
 }
@@ -420,7 +432,7 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
       return;
     }
     const list = assignments
-      .map((a, i) => `${i + 1}. @${a.agent.name}${a.type === "review" ? "（审查）" : a.after ? `（等${a.after.name}完成后）` : ""} ${a.task}`)
+      .map((a, i) => `${i + 1}. @${a.agent.name}${a.type === "review" ? "（审查）" : a.after ? `（等${names(a.after)}完成后）` : ""} ${a.task}`)
       .join("\n");
     patchMessage(
       plan.messageId,
@@ -437,7 +449,7 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
     const producers = assignments.filter((a) => a.type === "produce");
     const reviewers = assignments.filter((a) => a.type === "review");
     // Producers someone else builds on only work in round 1; the ones at the end of a chain revise.
-    const finals = producers.filter((p) => !producers.some((q) => q.after?.id === p.agent.id));
+    const finals = producers.filter((p) => !producers.some((q) => q.after?.some((x) => x.id === p.agent.id)));
     const takingTurns = !reviewers.length && (!!parsed?.speak || TAKE_TURNS.test(task));
 
     recorded = true;
@@ -470,12 +482,12 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
       const outputs = await Promise.all(
         writers.map((a) => {
           const work = (async () => {
-            if (r === 1 && a.after) await finished.get(a.after.id);
+            if (r === 1 && a.after) await Promise.all(a.after.map((x) => finished.get(x.id)));
             if (signal.aborted) return null;
             mark(a.agent.id, "produce", "working", r === 1 ? "" : `第 ${r} 轮修订`);
             const instruction =
               r === 1
-                ? `${lead.name}分配给你的任务：${a.task}\n用户的原始需求：「${task}」\n${a.after ? `${a.after.name}的产出已在群聊记录里，在它的基础上完成你的任务。\n` : ""}产出要逐项满足原始需求里的每个要求，直接给出完整产出。`
+                ? `${lead.name}分配给你的任务：${a.task}\n用户的原始需求：「${task}」\n${a.after ? `${names(a.after)}的产出已在群聊记录里，在它的基础上完成你的任务。\n` : ""}产出要逐项满足原始需求里的每个要求，直接给出完整产出。`
                 : `第 ${r - 1} 轮审查意见（[成立] 必须修改，[存疑] 请补充依据或说明）：\n${feedback}\n\n请在你上一版的基础上修订，输出完整的新版本；最后加一段「修订说明」，逐条说明每个疑点改了什么或为什么不改。`;
             const out = await speak({ chat: group.id, agent: a.agent, system: groupSystem(a.agent, group), messages: prompt(instruction), signal });
             round.steps.push({ agentId: a.agent.id, type: r === 1 ? "draft" : "revise", summary: summarize(out.text) || "未完成", tokens: out.tokens, failed: !out.ok, messageId: out.messageId });
