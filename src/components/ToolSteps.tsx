@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { answerQuestion, useQuestions } from "../lib/agentTools";
+import { linkClick } from "../lib/links";
 import { forget, remembered } from "../lib/memory";
 import { answer, undo, usePending } from "../lib/workmode";
 import { useData, usePrefs, useUi } from "../store";
@@ -66,6 +67,11 @@ const icons = {
 
 /** Steps about one file in the workspace; its name opens the file in the side panel. */
 const FILE_STEPS = new Set(["read_file", "write_file", "edit_file"]);
+
+/** Steps that fold open to the full command and what it printed. */
+const COMMAND_STEPS = new Set(["run_command", "start_job"]);
+/** Steps that fold open to what they returned (a folder listing, search hits, a job's output). */
+const OUTPUT_STEPS = new Set(["list_dir", "search_files", "job_output"]);
 
 const short = (s: string, n = 60) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
@@ -295,6 +301,10 @@ function Step({ step: t, messageId }: { step: ToolTrace; messageId: string }) {
         >
           {verb(t)}
         </button>
+      ) : t.name === "read_page" ? (
+        <a href={t.label} onClick={linkClick(t.label)} title={t.label} className="min-w-0 truncate underline decoration-line-2 underline-offset-2 hover:text-fg">
+          {verb(t)}
+        </a>
       ) : (
         <span className="min-w-0 truncate">{verb(t)}</span>
       )}
@@ -338,6 +348,36 @@ function Step({ step: t, messageId }: { step: ToolTrace; messageId: string }) {
           !t.detail && <span className="shrink-0 text-fg-3">· 已删除</span>
         )}
       </div>
+    );
+  }
+
+  // A command: folded until clicked, then the whole command and what it printed.
+  if ((COMMAND_STEPS.has(t.name) || (OUTPUT_STEPS.has(t.name) && t.output)) && t.status !== "running") {
+    return (
+      <details className="group/s">
+        <summary className={clsx(row, "cursor-pointer list-none select-none")}>
+          {head}
+          <ChevronDown size={14} className="shrink-0 transition-transform group-open/s:rotate-180" />
+        </summary>
+        <div className="mt-1.5 space-y-1.5 rounded-xl bg-active p-2.5">
+          {COMMAND_STEPS.has(t.name) && (
+            <div>
+              <div className="mb-1 text-[12px] text-fg-3">命令</div>
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-bg px-2.5 py-1.5 font-mono text-[12px] leading-[1.55]">{t.label}</pre>
+            </div>
+          )}
+          {t.output !== undefined ? (
+            <div>
+              {COMMAND_STEPS.has(t.name) && <div className="mb-1 text-[12px] text-fg-3">输出</div>}
+              <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-bg px-2.5 py-1.5 font-mono text-[12px] leading-[1.55] text-fg-2">
+                {t.output || "（没有输出）"}
+              </pre>
+            </div>
+          ) : (
+            t.name === "run_command" && <div className="text-[12px] text-fg-3">这一步没有保存输出（旧版本的记录）</div>
+          )}
+        </div>
+      </details>
     );
   }
 
@@ -409,7 +449,7 @@ function Step({ step: t, messageId }: { step: ToolTrace; messageId: string }) {
       <ol className="mt-1.5 space-y-1 rounded-xl bg-active p-2">
         {t.sources.map((s, i) => (
           <li key={s.url + i}>
-            <a href={s.url} target="_blank" rel="noreferrer" className="flex items-start gap-2 rounded-lg px-1.5 py-1 text-[13px] hover:bg-hover">
+            <a href={s.url} onClick={linkClick(s.url)} title={s.url} className="flex items-start gap-2 rounded-lg px-1.5 py-1 text-[13px] hover:bg-hover">
               <span className="mt-px shrink-0 font-mono text-[11.5px] text-fg-3">{(t.first ?? 1) + i}</span>
               <span className="min-w-0">
                 <span className="line-clamp-1 text-fg">{s.title}</span>

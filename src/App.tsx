@@ -6,6 +6,7 @@ import { DocPanel } from "./components/DocPanel";
 import { Editors } from "./components/Editors";
 import { ExplainPanel } from "./components/ExplainPanel";
 import { FilePanel } from "./components/FilePanel";
+import { LinkConfirm } from "./components/LinkConfirm";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Shortcuts } from "./components/Shortcuts";
 import { Sidebar } from "./components/Sidebar";
@@ -140,6 +141,7 @@ export default function App() {
       <SettingsDialog />
       <Shortcuts />
       <Editors />
+      <LinkConfirm />
     </div>
   );
 }

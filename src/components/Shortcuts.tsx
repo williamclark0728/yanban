@@ -22,7 +22,7 @@ const TRIGGERS: [string, string][] = [
 ];
 
 export function Shortcuts() {
-  const { helpOpen, setHelp } = useUi();
+  const { helpOpen, setHelp, openSettings } = useUi();
   useEffect(() => {
     if (!helpOpen) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setHelp(false);
@@ -59,6 +59,16 @@ export function Shortcuts() {
             </div>
           ))}
         </dl>
+        <button
+          type="button"
+          onClick={() => {
+            setHelp(false);
+            openSettings("guide");
+          }}
+          className="mt-4 text-[13px] font-medium text-accent-text hover:underline"
+        >
+          各个区域和按钮是做什么的？看新手教程
+        </button>
       </div>
     </div>
   );

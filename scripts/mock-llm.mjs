@@ -81,6 +81,8 @@ createServer(async (req, res) => {
     `- temperature=${payload.temperature} max_tokens=${payload.max_tokens ?? payload.max_completion_tokens} reasoning_effort=${payload.reasoning_effort}`;
   // Suggested next steps: "建议" ends the reply with a <next> block when the app asks for one.
   if (system.includes("<next>") && /建议/.test(last)) reply += "\n\n<next>生成 PPT|整理成对比表|派到群里写正式稿</next>";
+  // A reply that claims a file it never made, for the claim check under replies.
+  if (/假装生成/.test(last)) reply = 'Excel 文件已生成并存入工作区：信用表_20261028.xlsx（12,598 字节），已在 Excel 中成功打开。报告.md 也已保存。\n\n<生成的文件 文件名="信用表_20261028" format="xlsx"> {} </生成的文件>';
   // 0.6.0: a sub-agent, the goal check, and translating English reasoning.
   // 0.7.0: the smart-approval reviewer (anything that deletes is sent to the user) and rewriting a passage.
   if (system.includes("你是安全审查员")) {
@@ -264,7 +266,14 @@ createServer(async (req, res) => {
     res.write(chunk({}, "tool_calls"));
     return res.end("data: [DONE]\n\n");
   }
-  const thinking = payload.model !== "mock-think" ? "" : /英文思考/.test(last) ? "First, figure out what the user is asking for, then answer step by step with the key numbers." : "先看用户问了什么，再组织回答。";
+  const thinking =
+    payload.model !== "mock-think"
+      ? ""
+      : /英文思考/.test(last)
+        ? "First, figure out what the user is asking for, then answer step by step with the key numbers."
+        : /网址|论文/.test(last)
+          ? "先看来源 https://arxiv.org/abs/2401.00001，再对照 https://www.whu.edu.cn/info/1117.htm。"
+          : "先看用户问了什么，再组织回答。";
 
   if (!payload.stream) {
     res.writeHead(200, { ...cors, "content-type": "application/json" });

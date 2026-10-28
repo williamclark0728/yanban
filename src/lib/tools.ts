@@ -24,7 +24,13 @@ export function tracer(messageId: string) {
     const t = traces.find((x) => x.id === id);
     if (t?.status === "running") report({ ...t, status: "error", detail });
   };
-  return { report, halt, settle };
+  /** A call that failed before its tool ran, so the tool never reported it: shown as a failed step. */
+  const missed = (call: { id: string; name: string; message: string }) => {
+    if (traces.some((x) => x.id === call.id)) return;
+    const reason = /JSON|parse|Unexpected|Expected/i.test(call.message) ? "参数不是合法的 JSON，没有执行" : call.message.slice(0, 120);
+    report({ id: call.id, name: call.name as ToolTrace["name"], label: "调用失败", status: "error", detail: reason });
+  };
+  return { report, halt, settle, missed };
 }
 
 /**

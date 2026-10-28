@@ -9,6 +9,7 @@ import { call, isDesktop } from "./desktop";
 import { describeError, streamReply } from "./llm";
 import { mcpTools } from "./mcp";
 import { FILE_RULES, fileTools, filesText } from "./outputs";
+import { factsLine, HONEST_RULES, verifyReply } from "./verify";
 import { skillRules, skillTools } from "./skills";
 import { workRules, workTools } from "./workmode";
 import { AGENT_RULES, askTool, guard, PLAN_RULES, readOnly, todoTool, usePlanMode } from "./agentTools";
@@ -79,6 +80,7 @@ export function groupSystem(agent: Agent, group: Group) {
     `你在群聊「${group.name}」中。其他成员：${others.map((a) => `${a.name}（${a.tagline}）`).join("、") || "无"}。`,
     "聊天记录里【名字】表示发言人，【用户】是向大家提需求的人。",
     `只以「${agent.name}」的身份发言，不替别人发言，开头不要写自己的名字。`,
+    "成员发言后面的（系统记录：…）是程序记下的真实情况：调用了哪些工具、结果如何、工作区里实际多了哪些文件。转述或核对别人做的事以它为准；发言里说做了、记录里没有的，就是没做。",
     ...(group.workspace && isDesktop ? [`本群开启了工作模式，工作区是 ${group.workspace}：成员能读写其中的文件、运行命令，生成的文件会存进去。`] : []),
   ].join("\n");
 }
@@ -94,10 +96,12 @@ export function planSystem(lead: Agent, group: Group, members: Agent[]) {
     "1. 需要实际工作（写作、调研、分析、核查等）：拆成具体任务派给合适的成员，可以只派给部分成员，每人一条。",
     "   每条任务标明类型：produce 表示产出（写稿、调研、分析、写代码），review 表示审查别人的产出（核对事实和数字、检查逻辑措辞）。",
     "   需要准确性的成果，至少安排一名 produce 和一名 review；审查成员不产出，会在产出完成后检查并提出疑点，作者据此修订。",
-    "   produce 默认同时开始。如果某人要用到别人的产出（比如先搜集资料、再据此写稿），把前者排在前面，在后者的任务里写 after: 前者的名字（要等几个人就写几个名字，用顿号隔开），后者会等他们都完成再开始。没有先后关系的不写 after。",
+    "   produce 默认同时开始。如果某人要用到别人的产出（比如先搜集资料、再据此写稿），把前者排在前面，在后者的任务里写 after: 前者的名字（要等几个人就写几个名字，用顿号隔开），后者会等他们都完成再开始。没有先后关系的不写 after。要读取、核对或修改别人产出的文件，就必须写 after，否则会在文件还没生成时就开始。",
     "   mode 写 work。",
     "2. 要成员各自发言（自我介绍、各自说看法、轮流回答同一个问题）：给每位被点到的成员（说“大家”“每个人”就是全部成员）各派一条 produce 任务，task 写清要说什么、说多长；不安排 review。mode 写 speak。",
     "3. 打招呼、简单问答、问你自己的事：不分工，自己在 reply 里完整回答。mode 写 answer。",
+    "你在这一步不能调用任何工具。凡是要生成或发文件、运行命令、查看或核对工作区里的文件、联网查证的，都按第 1 种派给成员（产出类），不要自己说已经做了或马上去做。",
+    "成员可以用 make_file 把 Word、Excel、PPT 文件直接附在群聊消息里给用户下载，不要说群聊发不了文件。",
     "",
     "只输出一个 JSON 对象，不要输出其他内容。格式：",
     '{"reply": "你作为主持人自己说的话", "mode": "work 或 speak 或 answer", "assignments": [{"member": "成员名", "type": "produce 或 review", "task": "具体任务", "after": "要等的成员名，没有就省略"}]}',
@@ -149,7 +153,7 @@ export function privateHistory(messages: Message[], chat: string, limit: number)
   const turns = recent.map<ModelMessage>((m, i) =>
     m.sender === "me"
       ? { role: "user", content: userContent(withFiles(m) + added(recent.slice(i + 1).find((x) => x.sender !== "me")), i === lastUser ? latestImages([m]) : []) }
-      : { role: "assistant", content: [m.text, filesText(m.files)].filter(Boolean).join("\n\n") },
+      : { role: "assistant", content: [m.text, filesText(m.files), factsLine(m)].filter(Boolean).join("\n\n") },
   );
   while (turns[0]?.role === "assistant") turns.shift();
   return turns;
@@ -173,7 +177,7 @@ export function transcript(chat: string, limit: number, sinceId?: string) {
     if (m.kind === "text" && (m.status === "streaming" || m.status === "error" || m.summary)) return null;
     if (!m.text && !(m.kind === "text" && (m.attachments?.length || m.files?.length))) return null;
     const who = m.sender === "me" ? "用户" : (agentById(m.sender)?.name ?? m.sender);
-    const body = m.kind === "text" ? [withFiles(m), filesText(m.files)].filter(Boolean).join("\n\n") : [m.text, ...m.issues.map((i) => `- ${formatIssue(i)}`)].join("\n");
+    const body = m.kind === "text" ? [withFiles(m), filesText(m.files), m.sender !== "me" && factsLine(m)].filter(Boolean).join("\n\n") : [m.text, ...m.issues.map((i) => `- ${formatIssue(i)}`)].join("\n");
     return `【${who}】${body}`;
   };
   const lines = [...all.slice(0, start).map(line).filter(Boolean).slice(-limit), ...all.slice(start).map(line).filter(Boolean)];
@@ -191,6 +195,9 @@ export const sendsImages = (messages: ModelMessage[]) =>
   messages.some((m) => Array.isArray(m.content) && m.content.some((p) => p.type === "image"));
 
 // ---------- one agent speaking ----------
+
+/** Tools that can leave files in the workspace (commands and scripts included). */
+const WRITES = new Set(["write_file", "edit_file", "run_command", "make_file", "start_job", "mcp"]);
 
 interface Spoken {
   ok: boolean;
@@ -241,7 +248,7 @@ export async function speak(opts: {
     return { ok: false, text: "", tokens: 0, messageId: id };
   }
 
-  const { report, halt, settle } = tracer(id);
+  const { report, halt, settle, missed } = tracer(id);
   const web = webAccess(agent, report);
   const all: ToolSet = {
     ...web.tools,
@@ -265,6 +272,10 @@ export async function speak(opts: {
   const started = Date.now();
   const collect = async () => {
     if (!isDesktop || !agent.workspace) return;
+    // Group members work at the same time: a reply that wrote nothing must not claim a teammate's files.
+    const msg = useData.getState().messages.find((m) => m.id === id);
+    const wrote = msg?.kind === "text" && msg.tools?.some((t) => t.status === "done" && WRITES.has(t.name));
+    if (!wrote) return;
     try {
       const found = await call<{ path: string; size: number }[]>("ws_recent", { root: agent.workspace, sinceMs: started - 1000 });
       const files = found.filter((f) => !f.path.startsWith(".yanban/")).map(({ path, size }) => ({ path, size }));
@@ -294,7 +305,7 @@ export async function speak(opts: {
     const r = await streamReply({
       provider: target.provider,
       modelId: target.modelId,
-      system: [opts.system, FILE_RULES, skillRules(), work, jobRules(agent), AGENT_RULES, MEMORY_RULES, libraryRules(), scheduleRules(opts.chat), docRules(opts.chat), opts.plan && PLAN_RULES, opts.suggest && usePrefs.getState().suggest && NEXT_RULES]
+      system: [opts.system, FILE_RULES, skillRules(), work, jobRules(agent), AGENT_RULES, HONEST_RULES, MEMORY_RULES, libraryRules(), scheduleRules(opts.chat), docRules(opts.chat), opts.plan && PLAN_RULES, opts.suggest && usePrefs.getState().suggest && NEXT_RULES]
         .filter(Boolean)
         .join("\n\n"),
       messages: opts.messages,
@@ -303,6 +314,7 @@ export async function speak(opts: {
       tools,
       search: web.search,
       onSources: web.onSources,
+      onToolError: missed,
       steer: opts.steer
         ? () => {
             const taken = takeSteers(opts.chat);
@@ -336,6 +348,7 @@ export async function speak(opts: {
       true,
     );
     await collect();
+    await verifyReply(id, agent);
     return { ok: true, text: final.text, tokens: r.input + r.output, messageId: id };
   } catch (e) {
     done = true;

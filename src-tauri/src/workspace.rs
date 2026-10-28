@@ -210,6 +210,45 @@ pub async fn ws_recent(root: String, since_ms: u64) -> Result<Vec<Recent>, Strin
     .map_err(|e| e.to_string())?
 }
 
+/// Which of the files a reply mentions really exist: a full path is checked where it points, a relative
+/// path against the workspace, and a bare name anywhere in the workspace. Only answers yes or no; reads nothing.
+#[tauri::command]
+pub async fn ws_exists(root: String, names: Vec<String>) -> Result<Vec<bool>, String> {
+    let base = dunce::canonicalize(&root).map_err(|e| format!("工作区文件夹打不开：{e}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let bare = |n: &str| !n.contains('/') && !n.contains('\\');
+        let mut all: Option<std::collections::HashSet<String>> = None;
+        let mut out = Vec::with_capacity(names.len());
+        for name in &names {
+            let name = name.trim();
+            let found = if Path::new(name).is_absolute() {
+                Path::new(name).is_file()
+            } else if !bare(name) {
+                base.join(name).is_file()
+            } else {
+                let set = all.get_or_insert_with(|| {
+                    let skip = ["node_modules", "__pycache__", "target", ".venv", "venv"];
+                    ignore::WalkBuilder::new(&base)
+                        .standard_filters(false)
+                        .hidden(true)
+                        .filter_entry(move |e| !(e.file_type().is_some_and(|t| t.is_dir()) && skip.iter().any(|s| e.file_name().eq_ignore_ascii_case(s))))
+                        .build()
+                        .filter_map(|e| e.ok())
+                        .take(50_000)
+                        .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
+                        .map(|e| e.file_name().to_string_lossy().to_lowercase())
+                        .collect()
+                });
+                set.contains(&name.to_lowercase())
+            };
+            out.push(found);
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// A whole file as bytes, so the frontend can read it like an uploaded file (PDF, Word, Excel…).
 #[tauri::command]
 pub async fn ws_read_bytes(root: String, path: String) -> Result<tauri::ipc::Response, String> {

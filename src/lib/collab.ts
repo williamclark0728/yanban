@@ -21,8 +21,9 @@ import {
   userContent,
   withFiles,
 } from "./chat";
-import { completeText, describeError } from "./llm";
+import { completeText, describeError, repairJson } from "./llm";
 import { tracer, webAccess, type Report } from "./tools";
+import { verifyReply } from "./verify";
 
 type Kind = "produce" | "review";
 
@@ -62,10 +63,13 @@ function extractJson(raw: string): Record<string, unknown> | null {
   const start = text.indexOf("{");
   const stop = text.lastIndexOf("}");
   if (start < 0 || stop <= start) return null;
+  const body = text.slice(start, stop + 1);
   try {
-    return JSON.parse(text.slice(start, stop + 1));
+    return JSON.parse(body);
   } catch {
-    return null;
+    // Windows paths with single backslashes (D:\研伴测试\), trailing commas…
+    const fixed = repairJson(body);
+    return fixed ? JSON.parse(fixed) : null;
   }
 }
 
@@ -439,6 +443,8 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
       { text: [intro || (assignments.length ? "收到，分工如下：" : ""), list].filter(Boolean).join("\n\n"), reasoning: plan.reasoning?.trim() ? plan.reasoning : undefined, status: undefined, usage: plan.usage },
       true,
     );
+    // The lead plans without tools, so anything it says it did here is checked like any reply.
+    if (assignments.length === 0) await verifyReply(plan.messageId, lead);
     if (assignments.length === 0) {
       run.status = "done";
       delivered = intro;
@@ -560,10 +566,10 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
     const instruction = takingTurns
       ? "成员们已经各自发言。请用一两句话自然地收尾，比如回应一下大家、说说接下来可以怎么用这个群。不要复述或总结成员说过的话，不要写“结论”“各成员贡献”“未完成部分”这类小标题或列表。"
       : !reviewers.length
-        ? `请汇总以上成员的产出，完成用户的需求：${task}\n先给结论或成品，再简要列出各成员的贡献。没完成的部分如实说明。`
+        ? `请汇总以上成员的产出，完成用户的需求：${task}\n先给结论或成品，再简要列出各成员的贡献。没完成的部分如实说明。\n${FACTS_FIRST}`
         : passed
-        ? `审查已通过。请把最终成果交付给用户：先给出完整成品（以作者最新一版为准，不要改动已核实的内容，保留其中按用户要求列出的内容），再用几句话说明各成员的结论和修订经过。\n用户的原始需求：「${task}」`
-        : `已到最多轮数，审查仍未全部通过。请交付作者最新一版的完整成品，并如实列出仍未解决的疑点：\n${unresolved}\n用户的原始需求：「${task}」`;
+        ? `审查已通过。请把最终成果交付给用户：先给出完整成品（以作者最新一版为准，不要改动已核实的内容，保留其中按用户要求列出的内容），再用几句话说明各成员的结论和修订经过。\n用户的原始需求：「${task}」\n${FACTS_FIRST}`
+        : `已到最多轮数，审查仍未全部通过。请交付作者最新一版的完整成品，并如实列出仍未解决的疑点：\n${unresolved}\n用户的原始需求：「${task}」\n${FACTS_FIRST}`;
     mark(lead.id, "summary", "working");
     const final = await speak({ chat: group.id, agent: lead, system: groupSystem(lead, group), messages: prompt(instruction, lead.params.history), signal });
     mark(lead.id, "summary", final.ok ? "done" : "failed");
@@ -589,6 +595,10 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
   }
   return { status: run.status, text: delivered, note: run.rounds.at(-1)?.note };
 }
+
+/** The lead's delivery reports what happened by the app's records, not by what members said. */
+const FACTS_FIRST =
+  "说到文件、命令和操作时，以成员发言后的（系统记录）为准：记录里没有 make_file 成功或工作区新增的文件，就不要说文件已生成或已保存，而是如实告诉用户没生成，并说明可以让哪位成员用 make_file 生成；没有成功的命令就不要说已执行。不要编造路径、大小、修改时间和命令输出。";
 
 const outputsDone = (round: RunRound) => round.steps.filter((s) => s.type === "draft" && !s.failed).length;
 

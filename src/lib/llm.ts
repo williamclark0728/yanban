@@ -2,7 +2,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { APICallError, RetryError, generateText, isStepCount, streamText, type ModelMessage, type ToolSet } from "ai";
+import { APICallError, NoSuchToolError, RetryError, generateText, isStepCount, streamText, type ModelMessage, type ToolCallRepairFunction, type ToolSet } from "ai";
 import { useData } from "../store";
 import type { Effort, ModelParams, Provider, Source } from "../types";
 import { desktopFetch, isDesktop } from "./desktop";
@@ -276,7 +276,34 @@ interface CallOptions {
   onSources?: (sources: Source[]) => void;
   /** Messages the user sent while this reply runs; the model reads them before its next step. */
   steer?: () => string[];
+  /** A tool call that failed before its tool ran (unreadable arguments, unknown tool), so it can be shown as a step. */
+  onToolError?: (call: { id: string; name: string; message: string }) => void;
 }
+
+/**
+ * Almost-JSON from a model: code fences, trailing commas, Windows paths with single backslashes.
+ * Returns valid JSON text, or null when it still can't be read.
+ */
+export function repairJson(text: string): string | null {
+  const s = text
+    .trim()
+    .replace(/^```(?:json)?\s*|\s*```$/g, "")
+    .replace(/,\s*([}\]])/g, "$1")
+    .replace(/\\(["\\/bfnrtu])|\\/g, (whole, valid?: string) => (valid ? whole : "\\\\"));
+  try {
+    JSON.parse(s);
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+/** Tool arguments that aren't valid JSON get one repair attempt before the call counts as failed. */
+const repairToolCall: ToolCallRepairFunction<ToolSet> = async ({ toolCall, error }) => {
+  if (NoSuchToolError.isInstance(error)) return null;
+  const fixed = repairJson(toolCall.input);
+  return fixed && fixed !== toolCall.input ? { ...toolCall, input: fixed } : null;
+};
 
 /** Tool steps one reply may take. Work-mode tasks (read a skill, look around, write files) need many. */
 export const MAX_STEPS = 60;
@@ -331,7 +358,7 @@ function settings(opts: CallOptions, withTools: boolean, streaming: boolean) {
     reasoning: reasoning(provider, effort),
     abortSignal: opts.signal,
     maxRetries: 1,
-    ...(withTools && opts.tools ? { tools: opts.tools, stopWhen: isStepCount(opts.maxSteps ?? MAX_STEPS) } : {}),
+    ...(withTools && opts.tools ? { tools: opts.tools, stopWhen: isStepCount(opts.maxSteps ?? MAX_STEPS), repairToolCall } : {}),
     // Added messages carry forward to the later steps of the reply.
     ...(withTools && opts.tools && opts.steer
       ? {
@@ -401,7 +428,10 @@ export async function streamReply(
         gap = gap || stepHadText;
         stepHadText = false;
       } else if (part.type === "tool-call") produced = true;
-      else if (part.type === "error") throw part.error;
+      else if (part.type === "tool-error") {
+        const message = part.error instanceof Error ? part.error.message : String(part.error);
+        opts.onToolError?.({ id: part.toolCallId, name: part.toolName, message });
+      } else if (part.type === "error") throw part.error;
       else if (part.type === "abort") break;
     }
     if (opts.signal.aborted) throw new DOMException("stopped", "AbortError");

@@ -29,6 +29,20 @@ pub fn open_file(path: String) -> Result<(), String> {
     std::process::Command::new("explorer").arg(&path).spawn().map(|_| ()).map_err(|e| format!("打不开：{e}"))
 }
 
+/// Opens a web page in the default browser. Only http(s) addresses, so a link can't start a program.
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    let lower = url.to_ascii_lowercase();
+    if !(lower.starts_with("https://") || lower.starts_with("http://")) || url.chars().any(|c| c.is_whitespace() || c == '"') {
+        return Err("只能打开 http 或 https 网址".into());
+    }
+    std::process::Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", &url])
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("打不开浏览器：{e}"))
+}
+
 fn walk(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.filter_map(|e| e.ok()) {

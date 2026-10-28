@@ -5,7 +5,7 @@ import { create } from "zustand";
 import type { Agent, ToolTrace } from "../types";
 import { call, isDesktop } from "./desktop";
 import type { Report } from "./tools";
-import { approve, danger } from "./workmode";
+import { approve, danger, shown } from "./workmode";
 
 export interface JobInfo {
   id: string;
@@ -105,7 +105,7 @@ export function jobTools(agent: Agent, report: Report): ToolSet {
           }
           readTo.set(id, out.next);
           const text = out.text.length > MAX_SHOWN ? `…（前面省略 ${out.text.length - MAX_SHOWN} 字）\n${out.text.slice(-MAX_SHOWN)}` : out.text;
-          report({ ...s, status: "done", detail: out.done ? `已结束 · 退出码 ${out.code ?? "—"}` : "运行中" });
+          report({ ...s, status: "done", detail: out.done ? `已结束 · 退出码 ${out.code ?? "—"}` : "运行中", output: shown(out.text, "tail") });
           return [`${id}：${status(out)}`, out.cut && "（更早的输出已经丢弃）", text ? `新输出：\n${text}` : "没有新输出。"].filter(Boolean).join("\n");
         } catch (e) {
           report({ ...s, status: "error", detail: (e as Error).message });

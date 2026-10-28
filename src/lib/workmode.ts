@@ -172,6 +172,12 @@ interface Output {
   timed_out: boolean;
 }
 
+/** What a step keeps of a tool's output for the user to unfold: the start of a listing, or the end of a command's output. */
+export function shown(text: string, keep: "head" | "tail" = "head", max = 4000) {
+  if (text.length <= max) return text;
+  return keep === "head" ? `${text.slice(0, max)}\n…（后面省略 ${text.length - max} 字）` : `…（前面省略 ${text.length - max} 字）\n${text.slice(-max)}`;
+}
+
 export function workTools(agent: Agent, report: Report): ToolSet {
   if (!hasWorkspace(agent)) return {};
   const root = agent.workspace!;
@@ -191,8 +197,9 @@ export function workTools(agent: Agent, report: Report): ToolSet {
         if (!(await approve(report, s, "read", { what: `查看文件夹 ${path}` }, abortSignal))) return "用户没有同意。";
         try {
           const entries = await call<{ name: string; dir: boolean; size: number }[]>("ws_list", { root, path });
-          report({ ...s, status: "done", detail: `${entries.length} 项` });
-          return entries.map((e) => (e.dir ? `${e.name}/` : `${e.name}  (${e.size} 字节)`)).join("\n") || "（空文件夹）";
+          const list = entries.map((e) => (e.dir ? `${e.name}/` : `${e.name}  (${e.size} 字节)`)).join("\n") || "（空文件夹）";
+          report({ ...s, status: "done", detail: `${entries.length} 项`, output: shown(list) });
+          return list;
         } catch (e) {
           return fail(s, e);
         }
@@ -242,8 +249,9 @@ export function workTools(agent: Agent, report: Report): ToolSet {
         if (!(await approve(report, s, "read", { what: `搜索「${pattern}」` }, abortSignal))) return "用户没有同意。";
         try {
           const hits = await call<Hit[]>("ws_search", { root, pattern, path, glob });
-          report({ ...s, status: "done", detail: `${hits.length} 处${hits.length >= 200 ? "（只列前 200 处）" : ""}` });
-          return hits.map((h) => `${h.path}:${h.line}: ${h.text}`).join("\n") || "没有找到。";
+          const found = hits.map((h) => `${h.path}:${h.line}: ${h.text}`).join("\n") || "没有找到。";
+          report({ ...s, status: "done", detail: `${hits.length} 处${hits.length >= 200 ? "（只列前 200 处）" : ""}`, output: shown(found) });
+          return found;
         } catch (e) {
           return fail(s, e);
         }
@@ -314,11 +322,12 @@ export function workTools(agent: Agent, report: Report): ToolSet {
         report(s);
         try {
           const out = await call<Output>("run_command", { root, command, timeoutSecs: timeout });
+          const printed = shown([out.stdout, out.stderr].filter((x) => x?.trim()).join("\n").trimEnd(), "tail");
           if (out.timed_out) {
-            report({ ...s, status: "error", detail: "超时，已结束" });
+            report({ ...s, status: "error", detail: "超时，已结束", output: printed });
             return "命令超时，已被结束。";
           }
-          report({ ...s, status: out.code === 0 ? "done" : "error", detail: `退出码 ${out.code ?? "未知"}` });
+          report({ ...s, status: out.code === 0 ? "done" : "error", detail: `退出码 ${out.code ?? "未知"}`, output: printed });
           return [`退出码：${out.code}`, out.stdout && `输出：\n${out.stdout}`, out.stderr && `错误输出：\n${out.stderr}`].filter(Boolean).join("\n\n");
         } catch (e) {
           return fail(s, e);

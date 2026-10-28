@@ -1,14 +1,16 @@
 import clsx from "clsx";
-import { Bookmark, BookOpen, CalendarClock, LibraryBig, ChartColumn, CheckCircle2, ChevronLeft, Download, ExternalLink, Eye, EyeOff, Globe, Loader2, Minus, Plug, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
+import { Bookmark, BookOpen, CalendarClock, LibraryBig, ChartColumn, CheckCircle2, ChevronLeft, Download, ExternalLink, Eye, EyeOff, Globe, GraduationCap, Loader2, Minus, Plug, Plus, Server, SlidersHorizontal, Sparkles, X, XCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { protocols } from "../lib/catalog";
 import { DESKTOP_DOWNLOAD, DESKTOP_RELEASES, isDesktop } from "../lib/desktop";
+import { openExternal } from "../lib/links";
 import { describeError, listModels, testProvider } from "../lib/llm";
 import { CHAT_WIDTH_MAX, CHAT_WIDTH_MIN, isReady, resolveModel, stepZoom, TRIAL_ID, useData, usePrefs, useUi, ZOOM_MAX, ZOOM_MIN, type SettingsTab } from "../store";
 import type { Provider, SearchConfig } from "../types";
 import { searchProviders, searchReady, webSearch } from "../lib/search";
 import { seedAgents, seedGroups } from "../lib/seed";
 import { MeAvatar } from "./Avatar";
+import { Guide } from "./Guide";
 import { ConfigRow, LibrarySettings, McpSettings, MemorySettings, ScheduleSettings, SkillSettings } from "./Extensions";
 import { VersionRow } from "./UpdateCard";
 import { UsagePanel } from "./UsagePanel";
@@ -31,6 +33,7 @@ export function SettingsDialog() {
 
   const nav: { value: SettingsTab; label: string; icon: ReactNode }[] = [
     { value: "general", label: "通用", icon: <SlidersHorizontal size={17} /> },
+    { value: "guide", label: "新手教程", icon: <GraduationCap size={17} /> },
     { value: "providers", label: "模型服务", icon: <Server size={17} /> },
     { value: "search", label: "联网搜索", icon: <Globe size={17} /> },
     { value: "skills", label: "技能", icon: <BookOpen size={17} /> },
@@ -86,6 +89,7 @@ export function SettingsDialog() {
           </div>
           <div className="scroll min-h-0 flex-1 px-4 pb-6 md:px-6">
             {settingsTab === "general" && <General />}
+            {settingsTab === "guide" && <Guide />}
             {settingsTab === "providers" && <Providers />}
             {settingsTab === "search" && <SearchSettings />}
             {settingsTab === "skills" && <SkillSettings />}
@@ -114,7 +118,7 @@ export function Row({ title, desc, children }: { title: string; desc?: string; c
 }
 
 function General() {
-  const { mode, setMode, theme, setTheme, name, setName, approval, setApproval, fontSize, steps, zoom, suggest, chatWidth, set } = usePrefs();
+  const { mode, setMode, theme, setTheme, name, setName, approval, setApproval, fontSize, steps, zoom, suggest, chatWidth, confirmLinks, set } = usePrefs();
   const setHelp = useUi((s) => s.setHelp);
   const { agents, groups, restoreExamples } = useData();
   const [restoring, setRestoring] = useState(false);
@@ -212,6 +216,9 @@ function General() {
       </Row>
       <Row title="回答后的建议" desc={suggest ? "私聊回答下方给出两三个接下来可以做的事，点一下就发出" : "不显示"}>
         <Switch checked={suggest} onChange={(v) => set({ suggest: v })} label="回答后的建议" />
+      </Row>
+      <Row title="打开链接前确认" desc={confirmLinks ? "点来源或网址时先显示完整地址，确认后在浏览器打开" : "点了直接在浏览器打开"}>
+        <Switch checked={confirmLinks} onChange={(v) => set({ confirmLinks: v })} label="打开链接前确认" />
       </Row>
       <Row title="快捷键和命令" desc="输入 / 用命令，$ 选技能，@ 选成员或文件；选中回答里的文字可以引用或讲解">
         <button type="button" onClick={() => setHelp(true)} className="h-10 rounded-full border border-line-2 px-5 text-sm font-medium hover:bg-hover">
@@ -511,7 +518,7 @@ function SearchSettings() {
             <span className="flex items-center justify-between">
               API Key
               {meta.keyUrl && (
-                <a href={meta.keyUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[13px] font-normal text-accent-text hover:underline">
+                <a href={meta.keyUrl} onClick={(e) => (e.preventDefault(), openExternal(meta.keyUrl!))} className="flex items-center gap-1 text-[13px] font-normal text-accent-text hover:underline">
                   获取 API Key <ExternalLink size={13} />
                 </a>
               )}
@@ -627,7 +634,7 @@ function ProviderForm({ provider, onClose }: { provider?: Provider; onClose: () 
         <ProviderMark name={draft.name || "+"} />
         <div className="flex-1 text-lg font-semibold">{provider?.name ?? "自定义服务"}</div>
         {provider?.keyUrl && (
-          <a href={provider.keyUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[13px] text-accent-text hover:underline">
+          <a href={provider.keyUrl} onClick={(e) => (e.preventDefault(), openExternal(provider.keyUrl!))} className="flex items-center gap-1 text-[13px] text-accent-text hover:underline">
             获取 API Key <ExternalLink size={13} />
           </a>
         )}

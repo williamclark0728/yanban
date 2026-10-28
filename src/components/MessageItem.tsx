@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { AlertCircle, Archive, BookPlus, Brain, Check, CheckCircle2, ChevronDown, Circle, CircleDot, Copy, CornerDownRight, ExternalLink, FileDown, FilePen, FolderOpen, Languages, ListTodo, NotebookPen, Loader2, MessageSquarePlus, Play, RotateCcw, RotateCw, Sparkles, Square, Undo2 } from "lucide-react";
+import { AlertCircle, AlertTriangle, Archive, BookPlus, Brain, Check, CheckCircle2, ChevronDown, Circle, CircleDot, Copy, CornerDownRight, ExternalLink, FileDown, FilePen, FolderOpen, Languages, ListTodo, NotebookPen, Loader2, MessageSquarePlus, Play, RotateCcw, RotateCw, Sparkles, Square, Undo2 } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -11,13 +11,14 @@ import { retry, useBusy } from "../lib/chat";
 import { call } from "../lib/desktop";
 import { openDoc } from "../lib/docs";
 import { formatSize } from "../lib/files";
+import { linkClick, URL_RE } from "../lib/links";
 import { looksEnglish, translateReasoning } from "../lib/translate";
 import { send } from "../lib/queue";
 import { undoAll } from "../lib/workmode";
 import { download, replyAsDocx } from "../lib/outputs";
 import { clock } from "../lib/time";
 import { useData, usePrefs, useUi } from "../store";
-import type { Agent, Issue, Message, Todo, ToolTrace, Usage, Verdict } from "../types";
+import type { Agent, Issue, Message, Todo, ToolTrace, Unverified, Usage, Verdict } from "../types";
 import { BotAvatar, palette } from "./Avatar";
 import { FileCard, FileIcon, kindOf } from "./FileCard";
 import { MadeFiles } from "./MadeFiles";
@@ -72,8 +73,8 @@ export function RichText({ text, agents, cites }: { text: string; agents: Agent[
               return (
                 <a
                   href={href.slice(5)}
-                  target="_blank"
-                  rel="noreferrer"
+                  onClick={linkClick(href.slice(5))}
+                  title={href.slice(5)}
                   className="mx-px inline-grid h-[18px] min-w-[18px] place-items-center rounded-md bg-accent-soft px-1 align-[2px] text-[11px] font-semibold text-accent-text no-underline"
                 >
                   {children}
@@ -93,7 +94,7 @@ export function RichText({ text, agents, cites }: { text: string; agents: Agent[
               );
             }
             return (
-              <a href={href} target="_blank" rel="noreferrer">
+              <a href={href} onClick={href ? linkClick(href) : undefined} title={href}>
                 {children}
               </a>
             );
@@ -256,9 +257,28 @@ function Reasoning({ text, live, messageId, zh }: { text: string; live: boolean;
         )}
       </summary>
       {error && <div className="mt-1 text-[12.5px] text-bad">{error}</div>}
-      <div className="mt-1.5 whitespace-pre-wrap leading-relaxed">{zh && showZh ? zh : text}</div>
+      <div className="mt-1.5 whitespace-pre-wrap leading-relaxed">
+        <Linked text={zh && showZh ? zh : text} />
+      </div>
     </details>
   );
+}
+
+/** Plain text with its web addresses clickable, such as the pages a model mentions while thinking. */
+function Linked({ text }: { text: string }) {
+  const parts: ReactNode[] = [];
+  let at = 0;
+  for (const m of text.matchAll(URL_RE)) {
+    parts.push(text.slice(at, m.index));
+    parts.push(
+      <a key={m.index} href={m[0]} onClick={linkClick(m[0])} title={m[0]} className="break-all text-accent-text underline underline-offset-2">
+        {m[0]}
+      </a>,
+    );
+    at = m.index + m[0].length;
+  }
+  parts.push(text.slice(at));
+  return <>{parts}</>;
 }
 
 function Failure({ msg }: { msg: Extract<Message, { kind: "text" }> }) {
@@ -318,6 +338,26 @@ function Todos({ todos }: { todos: Todo[] }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/** What the reply claims that the app checked and could not confirm. */
+function Unconfirmed({ u }: { u: Unverified }) {
+  const lines = [
+    u.missing?.length && `回复里说的 ${u.missing.join("、")} 在工作区里找不到，文件并不存在。`,
+    u.fakeFile && "回复里手写了一段「生成的文件」，但没有调用 make_file，并没有生成文件。",
+    u.noTools && "回复说已经执行、生成或打开了什么，但这一步没有调用任何工具。说的是它自己做的，那就没有发生；说的是别人做的，以那条消息的工具步骤为准。",
+  ].filter(Boolean);
+  return (
+    <div className="mt-2 flex items-start gap-2 rounded-xl border border-warn/40 bg-warn-soft px-3 py-2 text-[13px] text-fg">
+      <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warn" />
+      <div className="min-w-0 space-y-0.5">
+        <div className="font-medium text-warn">研伴核对：这条回复有说法没有得到证实</div>
+        {lines.map((l) => (
+          <div key={l as string}>{l}</div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -627,6 +667,7 @@ export function MessageItem({
         )}
         {msg.kind === "text" && msg.files?.length ? <MadeFiles files={msg.files} /> : null}
         {msg.kind === "text" && msg.outputs?.files.length && !streaming ? <OutputFiles outputs={msg.outputs} /> : null}
+        {msg.kind === "text" && msg.unverified && !streaming ? <Unconfirmed u={msg.unverified} /> : null}
         {tools && !streaming && <Changes messageId={msg.id} tools={tools} />}
         {msg.kind === "text" && msg.plan && !streaming && !failed && isLatest && <RunPlan chat={msg.chat} />}
         {msg.kind === "text" && !inGroup && !column && !streaming && !failed && isLatest && <NextSteps msg={msg} />}

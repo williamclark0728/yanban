@@ -8,7 +8,7 @@ import type { Agent, Attachment, ChatRef, Doc, Group, Library, Schedule, McpServ
 
 export type Theme = "dark" | "light" | "system";
 export type PanelTab = "info" | "members" | "runs" | "memory";
-export type SettingsTab = "general" | "providers" | "search" | "skills" | "mcp" | "library" | "memory" | "schedules" | "usage";
+export type SettingsTab = "general" | "providers" | "search" | "skills" | "mcp" | "library" | "memory" | "schedules" | "usage" | "guide";
 
 /** Desktop work mode: which local actions need the user's OK. Dangerous commands always do. */
 export type Approval = "ask" | "read" | "smart" | "full";
@@ -33,11 +33,13 @@ interface Prefs {
   suggest: boolean;
   /** Widest the conversation column gets, in pixels; CHAT_WIDTH_MAX fills the window. */
   chatWidth: number;
+  /** Ask before a link opens in the browser, showing the full address. */
+  confirmLinks: boolean;
   setMode: (mode: Prefs["mode"]) => void;
   setTheme: (theme: Theme) => void;
   setName: (name: string) => void;
   setApproval: (approval: Approval) => void;
-  set: (patch: Partial<Pick<Prefs, "fontSize" | "steps" | "zoom" | "autoMemory" | "suggest" | "chatWidth">>) => void;
+  set: (patch: Partial<Pick<Prefs, "fontSize" | "steps" | "zoom" | "autoMemory" | "suggest" | "chatWidth" | "confirmLinks">>) => void;
 }
 
 export const CHAT_WIDTH_MIN = 640;
@@ -67,6 +69,7 @@ export const usePrefs = create<Prefs>()(
       autoMemory: true,
       suggest: true,
       chatWidth: 820,
+      confirmLinks: true,
       setMode: (mode) => set({ mode }),
       setTheme: (theme) => set({ theme }),
       setName: (name) => set({ name: name.slice(0, 20) }),

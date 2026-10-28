@@ -13,7 +13,7 @@ export const FILE_RULES = [
   "- xlsx：sheets 写每个工作表，rows 的第一行是表头；单元格都写成字符串，纯数字会自动存成数字。",
   "- pptx：title、subtitle 是封面；slides 每页写 title、bullets（3–6 条，每条一句话）和 notes（这一页的讲稿）。版式由程序套用，不用写格式。",
   "文件生成后显示为回复里的文件卡片，用户点开能逐页预览，点下载按钮就能保存；工作模式下还会自动存进工作区。所以你能交付文件，不要说环境不支持文件。",
-  "只有 make_file 返回“已生成”才算成功；返回“没有生成”时按提示改好再调用，不要声称已经生成。",
+  "只有 make_file 返回“已生成”才算成功；返回“没有生成”时按提示改好再调用，不要声称已经生成。在回复里贴出表格或文件内容不算生成文件。",
   "调用后在回复里用一两句话说明文件内容，不要把全文再贴一遍。用户没要文件时不要调用。",
 ].join("\n");
 
@@ -38,7 +38,9 @@ export function fileText(f: MadeFile) {
   return f.markdown ?? "";
 }
 
-export const filesText = (files?: MadeFile[]) => (files ?? []).map((f) => `<生成的文件 文件名="${fileName(f)}">\n${fileText(f)}\n</生成的文件>`).join("\n\n");
+/** Files a message really made, as text for later turns. Labelled as the app's record so models don't copy it to "make" a file. */
+export const filesText = (files?: MadeFile[]) =>
+  (files ?? []).map((f) => `（系统记录：这条回复调用 make_file 生成了文件「${fileName(f)}」，内容如下。）\n${fileText(f)}\n（文件内容结束）`).join("\n\n");
 
 interface Input {
   format?: string;

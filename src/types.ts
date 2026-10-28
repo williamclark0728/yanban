@@ -151,6 +151,8 @@ export type TextMessage = Base & {
   chosen?: boolean;
   /** Desktop work mode: files in the workspace this reply created or changed, including ones its commands wrote. */
   outputs?: { root: string; files: { path: string; size: number }[] };
+  /** What the reply claims that the app could not confirm (lib/verify.ts). */
+  unverified?: Unverified;
   /** The reasoning translated into Chinese, when the model thought in English. */
   reasoningZh?: string;
   /** What the user will likely want next, offered as buttons under the reply. */
@@ -411,4 +413,14 @@ export interface Provider {
   custom: boolean;
   keyless?: boolean;
   keyUrl?: string;
+}
+
+/** What a reply says it did that the app could not confirm; shown under the reply and in the group transcript. */
+export interface Unverified {
+  /** Files it says it made or saved that aren't there. */
+  missing?: string[];
+  /** It says it ran, wrote or opened something, but called no tool in this step. */
+  noTools?: boolean;
+  /** It wrote out a <生成的文件> block by hand, which makes no file. */
+  fakeFile?: boolean;
 }
