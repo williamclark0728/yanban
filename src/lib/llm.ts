@@ -3,6 +3,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { APICallError, NoSuchToolError, RetryError, generateText, isStepCount, streamText, type ModelMessage, type ToolCallRepairFunction, type ToolSet } from "ai";
+import { create } from "zustand";
 import { useData } from "../store";
 import type { Effort, ModelParams, Provider, Source } from "../types";
 import { desktopFetch, isDesktop } from "./desktop";
@@ -144,10 +145,208 @@ function reasoning(p: Provider, effort: Effort) {
   return effort;
 }
 
-export function languageModel(p: Provider, modelId: string, search = false, effort: Effort = "auto", streaming = true) {
+/** Shown on a reply while its request waits: in the service's queue, or after being turned away for going too fast. */
+export type Wait = (note: string | null) => void;
+
+/** Wait notes by message id, for the reply bubble. */
+export const useWaits = create<Record<string, string>>(() => ({}));
+
+export const showWait =
+  (id: string): Wait =>
+  (note) =>
+    useWaits.setState((s) => {
+      if (note) return s[id] === note ? s : { ...s, [id]: note };
+      if (!(id in s)) return s;
+      const rest = { ...s };
+      delete rest[id];
+      return rest;
+    }, true);
+
+/**
+ * Requests a service may have open at once; 0 means no limit.
+ * The 书生 API turns away a second request while one runs, so it gets 1 unless set otherwise.
+ */
+export function concurrencyOf(p: Pick<Provider, "maxConcurrent" | "baseUrl">) {
+  return p.maxConcurrent ?? (/(^|\.)intern-ai\.org\.cn$/.test(hostOf(p.baseUrl)) ? 1 : 0);
+}
+
+const stopped = () => new DOMException("stopped", "AbortError");
+
+function pause(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) return reject(stopped());
+    const stop = () => {
+      clearTimeout(timer);
+      reject(stopped());
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", stop);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", stop, { once: true });
+  });
+}
+
+interface Lane {
+  active: number;
+  queue: { go: () => void; show: (place: number) => void }[];
+}
+const lanes = new Map<string, Lane>();
+
+/**
+ * Waits for one of the service's slots and returns the function that frees it (calling it twice is harmless).
+ * A freed slot passes straight to the next request in line, so a new request can't jump the queue.
+ */
+async function takeSlot(p: Provider, signal: AbortSignal | undefined, onWait?: Wait): Promise<() => void> {
+  const limit = concurrencyOf(p);
+  if (!limit) return () => {};
+  let lane = lanes.get(p.id);
+  if (!lane) lanes.set(p.id, (lane = { active: 0, queue: [] }));
+  const l = lane;
+  const renumber = () => l.queue.forEach((q, i) => q.show(i + 1));
+  if (l.active < limit) l.active++;
+  else {
+    await new Promise<void>((resolve, reject) => {
+      if (signal?.aborted) return reject(stopped());
+      const leave = () => {
+        l.queue.splice(l.queue.indexOf(entry), 1);
+        renumber();
+        reject(stopped());
+      };
+      const entry = {
+        go: () => {
+          signal?.removeEventListener("abort", leave);
+          resolve();
+        },
+        show: (place: number) => onWait?.(`排队中，前面还有 ${place} 个请求（${p.name}同时只处理 ${limit} 个）`),
+      };
+      signal?.addEventListener("abort", leave, { once: true });
+      l.queue.push(entry);
+      entry.show(l.queue.length);
+    });
+    onWait?.(null);
+  }
+  let freed = false;
+  return () => {
+    if (freed) return;
+    freed = true;
+    const next = l.queue.shift();
+    if (next) {
+      next.go();
+      renumber();
+    } else l.active--;
+  };
+}
+
+/** Keeps the slot until the response has been read to the end (a streamed reply holds it while it streams). */
+function holdUntilRead(res: Response, release: () => void, signal?: AbortSignal): Response {
+  if (!res.body) {
+    release();
+    return res;
+  }
+  const reader = res.body.getReader();
+  signal?.addEventListener("abort", release, { once: true });
+  const body = new ReadableStream<Uint8Array>({
+    async pull(c) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          release();
+          c.close();
+        } else c.enqueue(value);
+      } catch (e) {
+        release();
+        c.error(e);
+      }
+    },
+    cancel(reason) {
+      release();
+      return reader.cancel(reason);
+    },
+  });
+  return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+}
+
+/** Seconds to wait between tries after being turned away for going too fast. */
+const BACKOFF = [2, 4, 8, 16, 30];
+const TOO_FAST = /rate.?limit|too many requests|频繁|频率|限流|并发/i;
+const NO_CREDIT = /insufficient|balance|billing|余额|欠费|额度不足|额度已用|arrear|exceeded your current quota/i;
+
+/** Too fast, as opposed to out of credit (waiting won't help) or this site's trial running out. */
+function tooFast(status: number, body: string) {
+  if (NO_CREDIT.test(body) || /^(体验|本站)/.test(bodyMessage(body))) return false;
+  return status === 429 || status === 503 || status === 529 || TOO_FAST.test(body);
+}
+
+/** How long the service asked us to wait, from the headers or (Gemini) the error body. */
+function askedWait(res: Response, body: string): number | null {
+  const ms = Number(res.headers.get("retry-after-ms"));
+  if (ms > 0) return ms;
+  const after = res.headers.get("retry-after");
+  if (after) {
+    const s = Number(after);
+    if (!Number.isNaN(s)) return s * 1000;
+    const at = Date.parse(after);
+    if (!Number.isNaN(at)) return at - Date.now();
+  }
+  const delay = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(body);
+  return delay ? Number(delay[1]) * 1000 : null;
+}
+
+/**
+ * Every model request goes through here: it waits for a free slot with the service, and when the service
+ * says it's going too fast, waits (as long as the service asks, else 2 → 4 → 8 → 16 → 30 s) and tries again.
+ * Each step of a tool loop is its own request, so a step after the reply began can wait and retry too.
+ */
+function pacedFetch(base: typeof fetch, p: Provider, onWait?: Wait): typeof fetch {
+  return async (input, init) => {
+    const signal = init?.signal ?? undefined;
+    let release = () => {};
+    try {
+      release = await takeSlot(p, signal, onWait);
+      for (let tries = 0; ; tries++) {
+        let res: Response;
+        try {
+          res = await base(input, init);
+        } catch (e) {
+          // A dropped connection gets one more go, as the SDK's own retry gave it.
+          if (signal?.aborted || tries > 0 || !(e instanceof TypeError)) throw e;
+          await pause(1500, signal);
+          continue;
+        }
+        if (res.ok) return holdUntilRead(res, release, signal);
+        const body = await res.text();
+        if (tooFast(res.status, body) && tries < BACKOFF.length) {
+          const asked = askedWait(res, body);
+          const ms = Math.min(Math.max(asked ?? BACKOFF[tries] * 1000, 1000), 60_000) + Math.random() * 500;
+          const end = Date.now() + ms;
+          for (let left = ms; left > 0; left = end - Date.now()) {
+            onWait?.(`被限速，${Math.ceil(left / 1000)} 秒后自动重试（第 ${tries + 1} 次，最多 ${BACKOFF.length} 次）`);
+            await pause(Math.min(left, 1000), signal);
+          }
+          onWait?.(null);
+          continue;
+        }
+        if (res.status >= 500 && tries === 0 && !tooFast(res.status, body)) {
+          await pause(1500, signal);
+          continue;
+        }
+        release();
+        return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+      }
+    } catch (e) {
+      release();
+      throw e;
+    } finally {
+      onWait?.(null);
+    }
+  };
+}
+
+export function languageModel(p: Provider, modelId: string, search = false, effort: Effort = "auto", streaming = true, onWait?: Wait) {
   const kind = search ? nativeSearch(p, modelId) : null;
   const edits = [kind && kind !== "gemini" ? searchEdit(kind) : null, effortEdit(p, effort, streaming)].filter((e) => !!e);
-  const fetch = editingFetch(fetchFor(p), edits);
+  const fetch = editingFetch(pacedFetch(fetchFor(p), p, onWait), edits);
   const baseURL = absolute(trimSlash(p.baseUrl));
   const apiKey = p.apiKey || "none";
   switch (p.protocol) {
@@ -252,7 +451,10 @@ export function describeError(e: unknown): { message: string; detail?: string } 
   if (/^(体验|联网搜索|本站)/.test(raw)) return { message: raw, detail };
   if (status === 401 || status === 403 || /api.?key.{0,20}(invalid|not valid)/i.test(raw)) return { message: "API Key 无效或没有权限", detail };
   if (status === 404) return { message: "找不到这个模型或接口地址", detail };
-  if (status === 429) return { message: "请求太频繁，或账户额度不足", detail };
+  if (status === 429) {
+    if (NO_CREDIT.test(body)) return { message: "账户余额或额度不足", detail };
+    return { message: "请求太频繁：自动等待重试几次后仍被限速。过一会再试，或在服务设置里把「同时请求数」调小", detail };
+  }
   if (status === 502 && raw.startsWith("upstream unreachable")) return { message: "连不上服务，检查 Base URL 或网络", detail };
   if (status >= 500) return { message: `服务暂时不可用（${status}）`, detail };
   if (status >= 400) return { message: raw ? `请求被拒绝：${raw}` : `请求被拒绝（${status}）`, detail };
@@ -278,6 +480,8 @@ interface CallOptions {
   steer?: () => string[];
   /** A tool call that failed before its tool ran (unreadable arguments, unknown tool), so it can be shown as a step. */
   onToolError?: (call: { id: string; name: string; message: string }) => void;
+  /** Queue and rate-limit waits, to show on the reply (see `showWait`). */
+  onWait?: Wait;
 }
 
 /**
@@ -349,7 +553,7 @@ function settings(opts: CallOptions, withTools: boolean, streaming: boolean) {
   // Claude only thinks at its default sampling settings.
   const thinkingClaude = provider.protocol === "anthropic" && effort !== "auto" && effort !== "off";
   return {
-    model: languageModel(provider, opts.modelId, opts.search, effort, streaming),
+    model: languageModel(provider, opts.modelId, opts.search, effort, streaming, opts.onWait),
     system: withTools ? opts.system : opts.tools ? opts.system + NO_TOOLS_NOTE : opts.system,
     messages: opts.messages,
     temperature: thinkingClaude ? undefined : provider.protocol === "anthropic" ? Math.min(params.temperature, 1) : params.temperature,
@@ -357,7 +561,8 @@ function settings(opts: CallOptions, withTools: boolean, streaming: boolean) {
     maxOutputTokens: params.maxTokens > 0 ? params.maxTokens : undefined,
     reasoning: reasoning(provider, effort),
     abortSignal: opts.signal,
-    maxRetries: 1,
+    // pacedFetch does the retrying; letting the SDK retry too would start the waits over.
+    maxRetries: 0,
     ...(withTools && opts.tools ? { tools: opts.tools, stopWhen: isStepCount(opts.maxSteps ?? MAX_STEPS), repairToolCall } : {}),
     // Added messages carry forward to the later steps of the reply.
     ...(withTools && opts.tools && opts.steer

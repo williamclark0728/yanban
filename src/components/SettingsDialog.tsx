@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { protocols } from "../lib/catalog";
 import { DESKTOP_DOWNLOAD, DESKTOP_RELEASES, isDesktop } from "../lib/desktop";
 import { openExternal } from "../lib/links";
-import { describeError, listModels, testProvider } from "../lib/llm";
+import { concurrencyOf, describeError, listModels, testProvider } from "../lib/llm";
 import { CHAT_WIDTH_MAX, CHAT_WIDTH_MIN, isReady, resolveModel, stepZoom, TRIAL_ID, useData, usePrefs, useUi, ZOOM_MAX, ZOOM_MIN, type SettingsTab } from "../store";
 import type { Provider, SearchConfig } from "../types";
 import { searchProviders, searchReady, webSearch } from "../lib/search";
@@ -589,6 +589,7 @@ function ProviderForm({ provider, onClose }: { provider?: Provider; onClose: () 
     return null;
   })();
 
+  const defaultLimit = concurrencyOf({ baseUrl: draft.baseUrl });
   const addModels = (ids: string[]) => set({ models: [...new Set([...draft.models, ...ids])] });
 
   const fetchModels = async () => {
@@ -729,6 +730,21 @@ function ProviderForm({ provider, onClose }: { provider?: Provider; onClose: () 
             placeholder="输入模型 ID 回车添加"
           />
         </div>
+      </Field>
+
+      <Field label="同时请求数" hint="同一服务同时发出的请求上限，多出来的排队等。限速严的服务（如书生）填 1，0 表示不限。被限速时会自动等待重试">
+        <input
+          type="number"
+          min={0}
+          max={20}
+          className={clsx(inputCls, "w-36")}
+          value={draft.maxConcurrent ?? ""}
+          onChange={(e) => {
+            const n = Math.round(Number(e.target.value));
+            set({ maxConcurrent: e.target.value === "" || Number.isNaN(n) ? undefined : Math.min(Math.max(n, 0), 20) });
+          }}
+          placeholder={defaultLimit ? `${defaultLimit}（默认）` : "不限"}
+        />
       </Field>
 
       <StatusBox status={status} />

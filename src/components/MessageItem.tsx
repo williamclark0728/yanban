@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { AlertCircle, AlertTriangle, Archive, BookPlus, Brain, Check, CheckCircle2, ChevronDown, Circle, CircleDot, Copy, CornerDownRight, ExternalLink, FileDown, FilePen, FolderOpen, Languages, ListTodo, NotebookPen, Loader2, MessageSquarePlus, Play, RotateCcw, RotateCw, Sparkles, Square, Undo2 } from "lucide-react";
+import { AlertCircle, AlertTriangle, Archive, BookPlus, Brain, Hourglass, Check, CheckCircle2, ChevronDown, Circle, CircleDot, Copy, CornerDownRight, ExternalLink, FileDown, FilePen, FolderOpen, Languages, ListTodo, NotebookPen, Loader2, MessageSquarePlus, Play, RotateCcw, RotateCw, Sparkles, Square, Undo2 } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -8,6 +8,7 @@ import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import { RUN_PLAN, setPlanMode } from "../lib/agentTools";
 import { retry, useBusy } from "../lib/chat";
+import { useWaits } from "../lib/llm";
 import { call } from "../lib/desktop";
 import { openDoc } from "../lib/docs";
 import { formatSize } from "../lib/files";
@@ -208,6 +209,20 @@ function Meta({
       {extra}
     </div>
   );
+}
+
+/** While a reply runs: why it's waiting (the service's queue, a rate limit), else the typing dots when nothing has arrived yet. */
+function Waiting({ id, typing }: { id: string; typing: boolean }) {
+  const note = useWaits((s) => s[id]);
+  if (note) {
+    return (
+      <span className="mt-1 flex items-center gap-1.5 text-[13px] text-fg-3" role="status">
+        <Hourglass size={13} className="shrink-0" />
+        {note}
+      </span>
+    );
+  }
+  return typing ? <Typing /> : null;
 }
 
 function Typing() {
@@ -544,6 +559,11 @@ function Summary({ msg, agents }: { msg: Extract<Message, { kind: "text" }>; age
         {working ? "正在压缩之前的对话…" : failed ? "压缩没有完成，之前的对话照常保留" : "之前的对话已压缩，之后的回复只带这份摘要"}
         <span className="h-px flex-1 bg-line" />
       </div>
+      {working && (
+        <div className="mt-1 flex justify-center">
+          <Waiting id={msg.id} typing={false} />
+        </div>
+      )}
       {msg.text && !failed && (
         <details className="group/s mx-auto mt-2 max-w-[680px] rounded-2xl border border-line bg-raise px-4 py-2.5 text-sm">
           <summary className="flex cursor-pointer list-none items-center gap-1.5 font-medium select-none">
@@ -660,7 +680,8 @@ export function MessageItem({
                 </div>
               ))}
             {tools && <ToolSteps steps={tools} messageId={msg.id} />}
-            {msg.text ? <RichText text={msg.text} agents={agents} cites={citations(tools)} /> : streaming && !reasoning && <Typing />}
+            {msg.text && <RichText text={msg.text} agents={agents} cites={citations(tools)} />}
+            {streaming && <Waiting id={msg.id} typing={!msg.text && !reasoning} />}
             {msg.text && !streaming && <CitedSources text={msg.text} steps={tools} />}
             {msg.kind === "review" && (
               <div className="mt-2.5 border-t border-line pt-2.5">

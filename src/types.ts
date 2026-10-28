@@ -413,6 +413,8 @@ export interface Provider {
   custom: boolean;
   keyless?: boolean;
   keyUrl?: string;
+  /** Requests sent to this service at once; the rest wait their turn. Unset: the default for the service (see `concurrencyOf`); 0: no limit. */
+  maxConcurrent?: number;
 }
 
 /** What a reply says it did that the app could not confirm; shown under the reply and in the group transcript. */

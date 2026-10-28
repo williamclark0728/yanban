@@ -3,7 +3,7 @@
 import { createServer } from "node:http";
 
 const PORT = 5199;
-const models = ["mock-chat", "mock-think"];
+const models = ["mock-chat", "mock-think", "mock-strict"];
 const cors = {
   "access-control-allow-origin": "*",
   "access-control-allow-headers": "*",
@@ -12,8 +12,28 @@ const cors = {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Rate-limit checks. mock-strict acts like the 书生 API: a second request while one runs gets 429.
+// "限速N" in the message gets 429 with Retry-After: 1 for its first N tries; "没额度" gets the 429 of an empty account.
+// GET /stats shows the most mock-strict requests open at once and how many were turned away.
+const stats = { open: 0, peak: 0, turnedAway: 0 };
+const tries = new Map();
+const tooMany = (res, message, after) => {
+  stats.turnedAway++;
+  res.writeHead(429, { ...cors, "access-control-expose-headers": "retry-after", "content-type": "application/json", ...(after ? { "retry-after": String(after) } : {}) });
+  res.end(JSON.stringify({ error: { message, type: "rate_limit_error" } }));
+};
+
 createServer(async (req, res) => {
   if (req.method === "OPTIONS") return res.writeHead(204, cors).end();
+  if (req.url === "/stats") {
+    res.writeHead(200, { ...cors, "content-type": "application/json" });
+    return res.end(JSON.stringify(stats));
+  }
+  if (req.url === "/stats/reset") {
+    Object.assign(stats, { peak: stats.open, turnedAway: 0 });
+    tries.clear();
+    return res.writeHead(204, cors).end();
+  }
   if (req.url === "/v1/models") {
     res.writeHead(200, { ...cors, "content-type": "application/json" });
     return res.end(JSON.stringify({ data: models.map((id) => ({ id, object: "model" })) }));
@@ -73,6 +93,19 @@ createServer(async (req, res) => {
   const files = (last.match(/<附件 文件名="([^"]+)"/g) ?? []).map((m) => m.slice(9, -1));
   const system = msgs.find((m) => m.role === "system")?.content ?? "";
   const me = /你是「(.+?)」/.exec(system)?.[1] ?? "助手";
+  if (/没额度/.test(last)) return tooMany(res, "Insufficient balance: 账户余额不足");
+  const limited = /限速(\d)/.exec(last);
+  if (limited) {
+    const n = (tries.get(last) ?? 0) + 1;
+    tries.set(last, n);
+    if (n <= Number(limited[1])) return tooMany(res, "Rate limit reached, please retry later", 1);
+  }
+  if (payload.model === "mock-strict") {
+    if (stats.open > 0) return tooMany(res, "Channel rate limit reached for model mock-strict");
+    stats.open++;
+    stats.peak = Math.max(stats.peak, stats.open);
+    res.on("close", () => stats.open--);
+  }
   let reply =
     `我是${me}（${payload.model}）。收到：「${last.slice(-60)}」。\n\n` +
     `- 上下文里有 ${msgs.filter((m) => m.role !== "system").length} 条消息\n` +

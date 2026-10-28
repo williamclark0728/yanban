@@ -21,7 +21,7 @@ import {
   userContent,
   withFiles,
 } from "./chat";
-import { completeText, describeError, repairJson } from "./llm";
+import { completeText, describeError, repairJson, showWait } from "./llm";
 import { tracer, webAccess, type Report } from "./tools";
 import { verifyReply } from "./verify";
 
@@ -206,6 +206,7 @@ async function think(opts: { chat: string; agent: Agent; system: string; message
       tools: Object.keys(web.tools).length ? web.tools : undefined,
       search: web.search,
       onSources: web.onSources,
+      onWait: showWait(id),
     });
     return {
       ok: true,

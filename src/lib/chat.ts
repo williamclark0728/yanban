@@ -6,7 +6,7 @@ import { AUTO_COMPACT, contextWindow, estimateTokens, sinceSummary, SUMMARY_PROM
 import { attachmentText, hasImages } from "./files";
 import { dispatchRules, dispatchTools } from "./collab";
 import { call, isDesktop } from "./desktop";
-import { describeError, streamReply } from "./llm";
+import { describeError, showWait, streamReply } from "./llm";
 import { mcpTools } from "./mcp";
 import { FILE_RULES, fileTools, filesText } from "./outputs";
 import { factsLine, HONEST_RULES, verifyReply } from "./verify";
@@ -315,6 +315,7 @@ export async function speak(opts: {
       search: web.search,
       onSources: web.onSources,
       onToolError: missed,
+      onWait: showWait(id),
       steer: opts.steer
         ? () => {
             const taken = takeSteers(opts.chat);
@@ -477,6 +478,7 @@ export async function compact(chat: string) {
       provider: target.provider,
       modelId: target.modelId,
       system: "你负责把一段对话压缩成摘要，供之后的对话接着用。",
+      onWait: showWait(id),
       messages: [{ role: "user", content: `${text}\n\n${SUMMARY_PROMPT}` }],
       params: { ...agent.params, temperature: 0.2 },
       signal: c.signal,
