@@ -261,7 +261,7 @@ function BaselinePanel({ run, agents, seconds }: { run: Run; agents: Agent[]; se
     ["Token", run.tokens.toLocaleString(), b.tokens.toLocaleString()],
     ["用时", seconds !== undefined ? `${seconds} 秒` : "-", `${b.seconds} 秒`],
   ];
-  if (b.reviews.length) rows.push(["审查：成立 / 存疑", multi ? `${multi.holds} / ${multi.unsure}` : "-", `${single.holds} / ${single.unsure}`]);
+  if (b.reviews.length) rows.push(["审查：需修改 / 存疑", multi ? `${multi.holds} / ${multi.unsure}` : "-", `${single.holds} / ${single.unsure}`]);
 
   return (
     <div className="mt-4 rounded-xl border border-line p-3">

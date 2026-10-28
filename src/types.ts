@@ -423,4 +423,6 @@ export interface Unverified {
   noTools?: boolean;
   /** It wrote out a <生成的文件> block by hand, which makes no file. */
   fakeFile?: boolean;
+  /** It lists references or links without having searched in this reply. */
+  unsourced?: boolean;
 }

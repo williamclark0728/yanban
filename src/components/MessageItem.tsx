@@ -23,7 +23,7 @@ import { BotAvatar, palette } from "./Avatar";
 import { FileCard, FileIcon, kindOf } from "./FileCard";
 import { MadeFiles } from "./MadeFiles";
 import { SaveSkill } from "./SaveSkill";
-import { citations, ToolSteps } from "./ToolSteps";
+import { CitedSources, citations, ToolSteps } from "./ToolSteps";
 import { IconButton } from "./ui";
 
 function withMentions(text: string, agents: Agent[]) {
@@ -110,8 +110,8 @@ export function RichText({ text, agents, cites }: { text: string; agents: Agent[
 export const verdictLabel: Record<Verdict, string> = { pass: "通过", done: "完成", stop: "结束", revise: "退回修订" };
 
 const issueStyle: Record<Issue["status"], { label: string; cls: string }> = {
-  holds: { label: "成立", cls: "bg-bad-soft text-bad" },
-  rejected: { label: "不成立", cls: "bg-raise-2 text-fg-2" },
+  holds: { label: "需修改", cls: "bg-bad-soft text-bad" },
+  rejected: { label: "没问题", cls: "bg-ok-soft text-ok" },
   unsure: { label: "存疑", cls: "bg-warn-soft text-warn" },
 };
 
@@ -212,10 +212,11 @@ function Meta({
 
 function Typing() {
   return (
-    <span className="flex h-[26px] items-center gap-1" aria-label="正在输入">
+    <span className="flex h-[26px] items-center gap-1 text-[13px] text-fg-3" aria-label="正在思考">
       {[0, 1, 2].map((i) => (
         <span key={i} className="size-1.5 animate-pulse rounded-full bg-fg-3" style={{ animationDelay: `${i * 160}ms` }} />
       ))}
+      <span className="ml-1">正在思考…</span>
     </span>
   );
 }
@@ -317,12 +318,13 @@ function Failure({ msg }: { msg: Extract<Message, { kind: "text" }> }) {
 }
 
 /** The agent's step list for this reply, ticked off as it works. */
-function Todos({ todos }: { todos: Todo[] }) {
+function Todos({ todos, ended }: { todos: Todo[]; ended: boolean }) {
   const done = todos.filter((t) => t.status === "done").length;
   return (
     <div className="mb-2 rounded-xl bg-active px-3 py-2">
       <div className="mb-1 flex items-center gap-1.5 text-[12.5px] font-medium text-fg-2">
         <ListTodo size={14} /> 步骤 {done}/{todos.length}
+        {ended && done < todos.length && <span className="font-normal text-fg-3">· 回复已结束，清单没有勾完</span>}
       </div>
       <ul className="space-y-0.5 text-[13.5px]">
         {todos.map((t, i) => (
@@ -347,6 +349,7 @@ function Unconfirmed({ u }: { u: Unverified }) {
   const lines = [
     u.missing?.length && `回复里说的 ${u.missing.join("、")} 在工作区里找不到，文件并不存在。`,
     u.fakeFile && "回复里手写了一段「生成的文件」，但没有调用 make_file，并没有生成文件。",
+    u.unsourced && "这次回复没有联网搜索，却列了参考资料或链接，可能是模型凭记忆写的，引用前请自己核实。",
     u.noTools && "回复说已经执行、生成或打开了什么，但这一步没有调用任何工具。说的是它自己做的，那就没有发生；说的是别人做的，以那条消息的工具步骤为准。",
   ].filter(Boolean);
   return (
@@ -648,7 +651,7 @@ export function MessageItem({
         {hasBody && (
           <div className="rounded-[20px] bg-bubble px-4 py-2.5" data-reply={msg.text && !streaming ? msg.id : undefined}>
             {reasoning && <Reasoning text={reasoning} live={streaming && !msg.text} messageId={msg.id} zh={msg.kind === "text" ? msg.reasoningZh : undefined} />}
-            {msg.kind === "text" && msg.todos?.length ? <Todos todos={msg.todos} /> : null}
+            {msg.kind === "text" && msg.todos?.length ? <Todos todos={msg.todos} ended={!streaming} /> : null}
             {msg.kind === "text" &&
               msg.steers?.map((s, i) => (
                 <div key={i} className="mb-2 flex items-start gap-1.5 rounded-xl bg-accent-soft px-3 py-1.5 text-[13px] text-accent-text">
@@ -658,6 +661,7 @@ export function MessageItem({
               ))}
             {tools && <ToolSteps steps={tools} messageId={msg.id} />}
             {msg.text ? <RichText text={msg.text} agents={agents} cites={citations(tools)} /> : streaming && !reasoning && <Typing />}
+            {msg.text && !streaming && <CitedSources text={msg.text} steps={tools} />}
             {msg.kind === "review" && (
               <div className="mt-2.5 border-t border-line pt-2.5">
                 <IssueList issues={msg.issues} />

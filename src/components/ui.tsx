@@ -5,6 +5,8 @@ export function IconButton({ className, children, ...rest }: ButtonHTMLAttribute
   return (
     <button
       type="button"
+      // Icon-only buttons show their name on hover.
+      title={rest["aria-label"]}
       className={clsx(
         "grid size-9 shrink-0 place-items-center rounded-full text-fg-2 transition-colors hover:bg-active hover:text-fg",
         className,

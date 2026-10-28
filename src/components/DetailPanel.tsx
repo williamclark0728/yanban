@@ -124,8 +124,8 @@ function GroupInfo({ group }: { group: Group }) {
             </div>
             <p className="mt-2 text-[13px] leading-relaxed text-fg-3">
               {group.consensus === "strict"
-                ? "所有疑点都被否定或解决才通过，存疑也要修改。"
-                : "没有成立的疑点即通过，存疑可以保留。"}
+                ? "所有审查意见都核实为没问题或已改好才通过，存疑也要处理。"
+                : "没有需修改的问题即通过，存疑可以保留。"}
             </p>
           </div>
         </Card>

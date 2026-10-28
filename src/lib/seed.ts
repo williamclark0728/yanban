@@ -98,6 +98,9 @@ export const seedGroups: Group[] = [
   },
 ];
 
+/** Ids of the example messages, so the app can label them as a demo rather than someone's real chat. */
+export const DEMO_IDS = new Set(["m1", "m2", "m3", "m4", "m5", "r1", "m6", "m7", "m8", "r2", "m9"]);
+
 /** A finished example collaboration so the group page shows how a run looks. */
 export function seedMessages(now: number): { messages: Message[]; runs: Run[] } {
   const t = (min: number) => now - (8 - min) * 60_000;

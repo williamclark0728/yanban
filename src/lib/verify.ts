@@ -1,12 +1,14 @@
 import { useData } from "../store";
 import type { Agent, TextMessage, Unverified } from "../types";
 import { call, isDesktop } from "./desktop";
+import { webPlan } from "./tools";
 
 /** For every agent with tools: say only what really happened. */
 export const HONEST_RULES = [
   "只说你这一步真正做过的事：没有调用工具并拿到成功结果，就不要说已执行、已运行、已生成、已写入、已保存、已打开、已核实。",
   "说文件存在、文件在哪之前，先用 list_dir、search_files 或 run_command 查过；不要编造命令输出、文件大小、修改时间、哈希值。",
   "工作区里新建的文件会自动列在回复下方，make_file 生成的文件会显示成文件卡片，都不用你写链接或“附件”；不要写假的链接。",
+  "这次回复没有联网搜索或读网页时，不要列参考文献、论文出处或网址，凭记忆写的出处常常是错的；用户需要出处时，建议打开联网再查。",
   "工具失败、文件没生成、没法做到时如实说，并给出下一步怎么办。不要在回复里手写「<生成的文件>」或贴出文件内容来代替 make_file，那样不会生成文件。",
 ].join("\n");
 
@@ -49,7 +51,16 @@ export async function verifyReply(messageId: string, agent: Agent) {
   const text = m.text.replace(/```[\s\S]*?```/g, " ");
   const found: Unverified = {};
   if (/<生成的文件[\s>]/.test(m.text)) found.fakeFile = true;
-  if (!m.tools?.length && assertions(text).some((s) => DID.test(s))) found.noTools = true;
+  // A lead's summary reports what members did: tools and files from this run's other messages count.
+  const lastAsk = messages.findLast((x) => x.chat === m.chat && x.kind === "text" && x.sender === "me" && x.at <= m.at);
+  const teamDid = messages.some(
+    (x) => x.chat === m.chat && x.id !== m.id && x.kind === "text" && x.at >= (lastAsk?.at ?? 0) && (x.files?.length || x.tools?.some((t) => t.status === "done")),
+  );
+  if (!m.tools?.length && !teamDid && assertions(text).some((s) => DID.test(s))) found.noTools = true;
+  // References without a search: models often make them up. Services that search on their own leave no step, so they are skipped.
+  const searched = m.tools?.some((t) => t.sources?.length || t.passages?.length || t.name === "read_page");
+  const plan = webPlan(agent);
+  if (!searched && plan !== "qwen" && plan !== "zhipu" && /https?:\/\/|参考(文献|资料)|References|et al\./i.test(text)) found.unsourced = true;
 
   if (isDesktop && agent.workspace) {
     // Files this reply really made, or that the user attached, are known to exist.
@@ -65,7 +76,7 @@ export async function verifyReply(messageId: string, agent: Agent) {
       }
     }
   }
-  if (found.missing || found.noTools || found.fakeFile) patchMessage(messageId, { unverified: found }, true);
+  if (found.missing || found.noTools || found.fakeFile || found.unsourced) patchMessage(messageId, { unverified: found }, true);
 }
 
 /** One line for the transcript: what the app knows about this message, so the next speaker can't take a claim at face value. */
@@ -84,5 +95,6 @@ export function factsLine(m: TextMessage) {
   if (u?.noTools) parts.push("这条发言说做了操作，但没有调用任何工具，那些操作没有实际发生");
   if (u?.fakeFile) parts.push("里面手写的「生成的文件」不是真文件，没有调用 make_file");
   if (u?.missing?.length) parts.push(`提到的 ${u.missing.join("、")} 在工作区里找不到`);
+  if (u?.unsourced) parts.push("这条发言没有联网搜索，列出的参考资料或链接可能不准确");
   return parts.length ? `（系统记录：${parts.join("。")}。）` : "";
 }

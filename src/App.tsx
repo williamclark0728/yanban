@@ -11,6 +11,7 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { Shortcuts } from "./components/Shortcuts";
 import { Sidebar } from "./components/Sidebar";
 import { UpdateCard } from "./components/UpdateCard";
+import { Welcome } from "./components/Welcome";
 import { isDesktop, setZoom } from "./lib/desktop";
 import { refreshJobs } from "./lib/jobs";
 import { startScheduler } from "./lib/schedule";
@@ -142,6 +143,7 @@ export default function App() {
       <Shortcuts />
       <Editors />
       <LinkConfirm />
+      <Welcome />
     </div>
   );
 }

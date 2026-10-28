@@ -4,7 +4,7 @@ import { judge } from "./collab";
 import { isDesktop, saveAs } from "./desktop";
 
 const stepName: Record<StepType, string> = { plan: "分工", draft: "产出", check: "核查", review: "审查", revise: "修订", summary: "最终交付" };
-const issueName: Record<Issue["status"], string> = { holds: "成立", unsure: "存疑", rejected: "不成立" };
+const issueName: Record<Issue["status"], string> = { holds: "需修改", unsure: "存疑", rejected: "没问题" };
 const verdictName = { pass: "通过", revise: "退回修订", stop: "结束", done: "完成" } as const;
 
 const stamp = (t: number) => {
@@ -40,7 +40,7 @@ export function runToMarkdown(run: Run) {
     "",
     `- 群聊：${group?.name ?? "已解散"}；主持：${group ? name(group.leadId) : "-"}`,
     `- 开始：${stamp(run.startedAt)}${seconds !== undefined ? `；用时 ${seconds} 秒` : ""}；共 ${run.rounds.length} 轮；Token ${run.tokens.toLocaleString()}`,
-    `- 共识规则：${(run.consensus ?? group?.consensus) === "relaxed" ? "宽松（没有成立的疑点即通过）" : "严格（成立和存疑都要解决）"}；最多 ${run.maxRounds ?? group?.maxRounds ?? "-"} 轮`,
+    `- 共识规则：${(run.consensus ?? group?.consensus) === "relaxed" ? "宽松（没有需修改的问题即通过）" : "严格（需修改和存疑都要解决）"}；最多 ${run.maxRounds ?? group?.maxRounds ?? "-"} 轮`,
     `- 结果：${{ done: "已完成", running: "进行中", stopped: "已停止", failed: "未完成" }[run.status]}`,
     "",
     "## 用户需求",
@@ -61,7 +61,7 @@ export function runToMarkdown(run: Run) {
     if (round.verdict) {
       const issues = round.steps.filter((s) => s.type === "review").flatMap((s) => s.issues ?? []);
       const count = (s: Issue["status"]) => issues.filter((i) => i.status === s).length;
-      const detail = issues.length ? `成立 ${count("holds")}、存疑 ${count("unsure")}、不成立 ${count("rejected")}` : round.note;
+      const detail = issues.length ? `需修改 ${count("holds")}、存疑 ${count("unsure")}、没问题 ${count("rejected")}` : round.note;
       out.push("", `**本轮判定：${verdictName[round.verdict]}**${detail ? ` · ${detail}` : ""}`);
     }
   }
@@ -84,7 +84,7 @@ export function runToMarkdown(run: Run) {
       `| 轮数 | ${run.rounds.length} | 1 |`,
       `| Token | ${run.tokens.toLocaleString()} | ${b.tokens.toLocaleString()} |`,
       `| 用时（秒） | ${seconds ?? "-"} | ${b.seconds} |`,
-      `| 最后一次审查：成立 / 存疑 | ${finalCounts(run)} | ${v.holds} / ${v.unsure} |`,
+      `| 最后一次审查：需修改 / 存疑 | ${finalCounts(run)} | ${v.holds} / ${v.unsure} |`,
       "",
       "### 单 Agent 产出",
       "",

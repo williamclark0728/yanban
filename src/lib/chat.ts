@@ -159,7 +159,7 @@ export function privateHistory(messages: Message[], chat: string, limit: number)
   return turns;
 }
 
-const issueTag: Record<Issue["status"], string> = { holds: "成立", unsure: "存疑", rejected: "不成立" };
+const issueTag: Record<Issue["status"], string> = { holds: "需修改", unsure: "存疑", rejected: "没问题" };
 
 export const formatIssue = (i: Issue) => `[${issueTag[i.status]}] ${i.text}${i.evidence ? `（依据：${i.evidence}）` : ""}`;
 

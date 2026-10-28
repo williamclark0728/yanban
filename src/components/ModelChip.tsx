@@ -20,7 +20,7 @@ export function ModelChip({ agent }: { agent: Agent }) {
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        title={`${target.provider.name} · ${target.modelId}`}
+        title={target.provider.id === TRIAL_ID ? "免费体验模型：每调用一次模型算一次，联网搜索时要先搜再答，通常算两次" : `${target.provider.name} · ${target.modelId}`}
         className={clsx(
           "flex h-8 max-w-[200px] items-center gap-1 rounded-full px-3 text-[13px] text-fg-2 transition-colors hover:bg-active hover:text-fg",
           open && "bg-active text-fg",

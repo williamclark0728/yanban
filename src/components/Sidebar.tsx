@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { Bot, LayoutTemplate, Plus, Quote, Search, Settings, Users, X } from "lucide-react";
+import { Bot, CircleHelp, LayoutTemplate, Plus, Quote, Search, Settings, Users, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { searchMessages, type Hit } from "../lib/memory";
 import { listTime } from "../lib/time";
@@ -163,6 +163,9 @@ export function Sidebar() {
           <MeAvatar size={34} />
           <span className={clsx("truncate", name ? "font-medium" : "text-fg-3")}>{name || "设置昵称"}</span>
         </button>
+        <IconButton aria-label="新手教程" title="新手教程：各个区域和按钮怎么用" onClick={() => openSettings("guide")}>
+          <CircleHelp size={18} />
+        </IconButton>
         <IconButton aria-label="设置" onClick={() => openSettings()}>
           <Settings size={18} />
         </IconButton>

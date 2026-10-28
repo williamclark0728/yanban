@@ -40,7 +40,7 @@ export function ContextMeter({ chat }: { chat: string }) {
           <circle cx="9" cy="9" r={r} fill="none" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2.5" />
           <circle cx="9" cy="9" r={r} fill="none" stroke="currentColor" strokeWidth="2.5" strokeDasharray={`${c * ratio} ${c}`} strokeLinecap="round" />
         </svg>
-        <span className="hidden sm:inline">{percent(ratio)}</span>
+        <span className="hidden sm:inline">上下文 {percent(ratio)}</span>
       </button>
       {open && (
         <>

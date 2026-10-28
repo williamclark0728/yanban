@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { ChevronDown, ChevronLeft, ChevronUp, ClipboardList, Clock, CornerDownRight, FileUp, Lightbulb, NotebookPen, PanelRight, Pencil, PlugZap, Quote, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronUp, ClipboardList, Clock, CornerDownRight, FileUp, Info, Lightbulb, NotebookPen, PanelRight, Pencil, PlugZap, Quote, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { setPlanMode, usePlanMode } from "../lib/agentTools";
 import { compact, newTopic, stop, useBusy } from "../lib/chat";
@@ -17,6 +17,7 @@ import { openDoc } from "../lib/docs";
 import { Composer, type Command, type ComposerHandle } from "./Composer";
 import { ContextMeter, EffortChip } from "./ContextMeter";
 import { MessageItem } from "./MessageItem";
+import { DEMO_IDS } from "../lib/seed";
 import { ModelChip } from "./ModelChip";
 import { TaskBoard } from "./TaskBoard";
 import { IconButton } from "./ui";
@@ -305,9 +306,19 @@ export function ChatView() {
                 </div>
               );
             }
+            // The built-in example run is labelled, so nobody takes it for a real chat.
+            const demoStart = DEMO_IDS.has(m.id) && !(prev && DEMO_IDS.has(prev.id));
             return (
               <div key={m.id} id={`msg-${m.id}`} className={clsx("rounded-2xl transition-colors duration-700", flash === m.id && "bg-accent-soft")}>
                 {day}
+                {demoStart && (
+                  <div className="mx-auto mb-4 flex max-w-xl items-start gap-2 rounded-xl border border-dashed border-line-2 px-3.5 py-2.5 text-[13px] text-fg-2">
+                    <Info size={15} className="mt-0.5 shrink-0 text-accent-text" />
+                    <span>
+                      下面是<b className="font-semibold text-fg">内置的示例对话</b>，演示群聊怎么分工、审查和交付，不是真实的聊天记录。直接在下方输入框发消息就能开始用。
+                    </span>
+                  </div>
+                )}
                 <MessageItem
                   msg={m}
                   agents={agents}

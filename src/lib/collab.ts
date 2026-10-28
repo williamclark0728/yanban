@@ -51,6 +51,8 @@ const REVIEW_RULES = [
   "- unsure（存疑）：找不到依据确认，需要作者补充依据或说明",
   "- rejected（不成立）：核对过，没有问题",
   "重点写 holds 和 unsure；关键数字和结论即使没问题，也列为 rejected，表明你核对过。",
+  "只有影响事实、数字、结论、原意或用户明确要求的问题才判 holds。换个同义词、调整语序这类措辞偏好不算问题，不要列；确实影响理解的措辞最多记 unsure。",
+  "上一轮已经按意见改好的地方不要再提，更不要要求改回去。改写类任务要检查有没有改变原意、有没有加入原文没有的判断或程度词。",
   "每条写清原文怎么写、问题是什么、建议怎么改；evidence 写依据位置（文件名和行号或页码），没有就留空。",
   "只输出一个 JSON 对象，不要输出其他内容：",
   '{"summary": "一句话结论", "issues": [{"text": "……", "status": "holds 或 unsure 或 rejected", "evidence": "……"}]}',
@@ -116,8 +118,8 @@ export function parsePlan(raw: string, members: Agent[]): { reply: string; speak
 
 export function issueStatus(value: unknown): IssueStatus {
   const v = String(value ?? "").toLowerCase();
-  if (/不成立|rejected|no issue|pass|通过|正确/.test(v)) return "rejected";
-  if (/成立|holds|confirmed|error|错误/.test(v)) return "holds";
+  if (/不成立|没问题|无问题|rejected|no issue|pass|通过|正确/.test(v)) return "rejected";
+  if (/成立|需修改|holds|confirmed|error|错误/.test(v)) return "holds";
   return "unsure";
 }
 
@@ -435,6 +437,11 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
       delivered = answer.text;
       return;
     }
+    // Work someone writes gets checked: when the lead assigns no reviewer, the group's checkers review it.
+    if (assignments.length && !parsed?.speak && !TAKE_TURNS.test(task) && !assignments.some((a) => a.type === "review")) {
+      const checkers = members.filter((m) => !assignments.some((a) => a.agent.id === m.id) && /审|核|查/.test(`${m.name}${m.role.duty}`));
+      assignments = [...assignments, ...checkers.map((agent) => ({ agent, type: "review" as const, task: "核对事实和数字，检查是否满足用户的要求、有没有改变原意" }))];
+    }
     const list = assignments
       .map((a, i) => `${i + 1}. @${a.agent.name}${a.type === "review" ? "（审查）" : a.after ? `（等${names(a.after)}完成后）` : ""} ${a.task}`)
       .join("\n");
@@ -493,8 +500,8 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
             mark(a.agent.id, "produce", "working", r === 1 ? "" : `第 ${r} 轮修订`);
             const instruction =
               r === 1
-                ? `${lead.name}分配给你的任务：${a.task}\n用户的原始需求：「${task}」\n${a.after ? `${names(a.after)}的产出已在群聊记录里，在它的基础上完成你的任务。\n` : ""}产出要逐项满足原始需求里的每个要求，直接给出完整产出。`
-                : `第 ${r - 1} 轮审查意见（[成立] 必须修改，[存疑] 请补充依据或说明）：\n${feedback}\n\n请在你上一版的基础上修订，输出完整的新版本；最后加一段「修订说明」，逐条说明每个疑点改了什么或为什么不改。`;
+                ? `${lead.name}分配给你的任务：${a.task}\n用户的原始需求：「${task}」\n${a.after ? `${names(a.after)}的产出已在群聊记录里，在它的基础上完成你的任务。\n` : ""}产出要逐项满足原始需求里的每个要求，直接给出完整产出。不要加入材料和原文里没有的事实、结论或程度词。`
+                : `第 ${r - 1} 轮审查意见（[需修改] 必须修改，[存疑] 请补充依据或说明）：\n${feedback}\n\n请在你上一版的基础上修订，输出完整的新版本；最后加一段「修订说明」，逐条说明每个疑点改了什么或为什么不改。`;
             const out = await speak({ chat: group.id, agent: a.agent, system: groupSystem(a.agent, group), messages: prompt(instruction), signal });
             round.steps.push({ agentId: a.agent.id, type: r === 1 ? "draft" : "revise", summary: summarize(out.text) || "未完成", tokens: out.tokens, failed: !out.ok, messageId: out.messageId });
             mark(a.agent.id, "produce", out.ok ? "done" : "failed");
@@ -551,11 +558,11 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
       round.verdict = passed ? "pass" : last ? "stop" : "revise";
       round.note = passed
         ? verdict.unsure
-          ? `没有成立的疑点，按宽松规则通过，保留 ${verdict.unsure} 条存疑`
+          ? `没有需修改的问题，按宽松规则通过，保留 ${verdict.unsure} 条存疑`
           : `${names(done.map((d) => d.reviewer))}审查通过`
         : last
-          ? `已到最多 ${maxRounds} 轮，仍有 ${verdict.holds} 条成立、${verdict.unsure} 条存疑`
-          : `${verdict.holds} 条成立、${verdict.unsure} 条存疑，退回修订`;
+          ? `已到最多 ${maxRounds} 轮，仍有 ${verdict.holds} 条需修改、${verdict.unsure} 条存疑`
+          : `${verdict.holds} 条需修改、${verdict.unsure} 条存疑，退回修订`;
       addMessage({ id: uid(), chat: group.id, kind: "round", runId: run.id, round: r, verdict: round.verdict, note: round.note, at: Date.now() });
       save();
       if (passed) break;
@@ -598,6 +605,7 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
 
 /** The lead's delivery reports what happened by the app's records, not by what members said. */
 const FACTS_FIRST =
+  "这是最后一条交付消息：直接给出完整的最终成品或结论，不要说“正在处理”“稍后给出”。" +
   "说到文件、命令和操作时，以成员发言后的（系统记录）为准：记录里没有 make_file 成功或工作区新增的文件，就不要说文件已生成或已保存，而是如实告诉用户没生成，并说明可以让哪位成员用 make_file 生成；没有成功的命令就不要说已执行。不要编造路径、大小、修改时间和命令输出。";
 
 const outputsDone = (round: RunRound) => round.steps.filter((s) => s.type === "draft" && !s.failed).length;

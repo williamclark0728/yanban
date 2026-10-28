@@ -190,6 +190,35 @@ export function citations(steps?: ToolTrace[]) {
   return map;
 }
 
+/** The sources a reply cites with [n], listed under it so each can be opened and checked. */
+export function CitedSources({ text, steps }: { text: string; steps?: ToolTrace[] }) {
+  const all = new Map<number, NonNullable<ToolTrace["sources"]>[number]>();
+  for (const s of steps ?? []) s.sources?.forEach((src, i) => all.set((s.first ?? 1) + i, src));
+  const cited = [...new Set([...text.matchAll(/\[(\d{1,3})\](?![(:])/g)].map((m) => Number(m[1])))].filter((n) => all.has(n)).sort((a, b) => a - b);
+  if (!cited.length) return null;
+  return (
+    <div className="mt-3 border-t border-line pt-2">
+      <div className="mb-1 text-[12px] font-medium text-fg-3">
+        来源（点开核实）{all.size > cited.length && ` · 回答引用了搜到的 ${all.size} 条中的 ${cited.length} 条，编号沿用搜索结果`}
+      </div>
+      <ol className="space-y-0.5">
+        {cited.map((n) => {
+          const s = all.get(n)!;
+          return (
+            <li key={n}>
+              <a href={s.url} onClick={linkClick(s.url)} title={s.url} className="flex items-baseline gap-2 rounded-lg px-1 py-0.5 text-[13px] hover:bg-hover">
+                <span className="shrink-0 font-mono text-[11.5px] font-semibold text-accent-text">[{n}]</span>
+                <span className="min-w-0 truncate text-fg">{s.title || s.url}</span>
+                <span className="shrink-0 text-[12px] text-fg-3">{[s.site ?? shortUrl(s.url), s.date].filter(Boolean).join(" · ")}</span>
+              </a>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 /** What an agent did with its tools before (or while) answering. */
 export function ToolSteps({ steps, messageId }: { steps: ToolTrace[]; messageId: string }) {
   const brief = usePrefs((s) => s.steps === "brief");
