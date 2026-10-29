@@ -436,10 +436,19 @@ export function contextUse(chat: string) {
   const { summary, rest } = sinceSummary(messages.filter((m) => m.chat === chat));
   const history = group ? transcript(chat, agent.params.history) : privateHistory(messages, chat, agent.params.history).map(plainText).join("\n");
   const system = [group ? groupSystem(agent, group) : systemPrompt(agent), FILE_RULES, skillRules(), !group && summary?.text].filter(Boolean).join("\n");
+  // Every member of a group reads the same transcript, so the member whose model reads the least sets the limit.
+  let tightest = { name: agent.name, modelId: target.modelId, window: contextWindow(target.modelId) };
+  for (const id of group?.memberIds ?? []) {
+    const member = agentById(id);
+    const t = member && resolveModel(member, providers, defaultModel);
+    if (t && contextWindow(t.modelId) < tightest.window) tightest = { name: member.name, modelId: t.modelId, window: contextWindow(t.modelId) };
+  }
   return {
     used: estimateTokens(system + history) + TOOL_OVERHEAD,
-    window: contextWindow(target.modelId),
-    model: target.modelId,
+    window: tightest.window,
+    model: tightest.modelId,
+    /** In a group: the member whose model has the smallest window. */
+    member: group ? tightest.name : undefined,
     /** Messages since the last summary; compressing fewer than a few is pointless. */
     pending: rest.filter((m) => m.kind !== "round").length,
   };

@@ -11,6 +11,9 @@ export function ContextMeter({ chat }: { chat: string }) {
   // Re-render as messages change.
   useData((s) => s.messages.length);
   useData((s) => s.messages.at(-1)?.at);
+  // ...and as members switch models, since the smallest window in a group sets the limit.
+  useData((s) => s.agents);
+  useData((s) => s.defaultModel);
   const busy = useBusy((s) => !!s[chat]);
   const [open, setOpen] = useState(false);
   const [working, setWorking] = useState(false);
@@ -54,7 +57,7 @@ export function ContextMeter({ chat }: { chat: string }) {
               <div className={clsx("h-full rounded-full", ratio >= AUTO_COMPACT ? "bg-bad" : ratio >= 0.5 ? "bg-warn" : "bg-accent")} style={{ width: `${ratio * 100}%` }} />
             </div>
             <p className="mt-3 text-[12.5px] leading-relaxed text-fg-3">
-              {use.model} 的窗口按 {fmtTokens(use.window)} 估算，包括设定、最近的消息、附件和工具说明。超过 {AUTO_COMPACT * 100}% 时，发下一条消息前会自动压缩：把之前的对话写成摘要，之后只带摘要。
+              {use.member ? `群里窗口最小的是${use.member}（${use.model}），按它的 ${fmtTokens(use.window)} 估算，` : `${use.model} 的窗口按 ${fmtTokens(use.window)} 估算，`}包括设定、最近的消息、附件和工具说明。超过 {AUTO_COMPACT * 100}% 时，发下一条消息前会自动压缩：把之前的对话写成摘要，之后只带摘要。
             </p>
             <button
               type="button"
