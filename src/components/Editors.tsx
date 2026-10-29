@@ -7,6 +7,7 @@ import { BotAvatar, palette } from "./Avatar";
 import { ModelPicker } from "./ModelPicker";
 import { SaveTemplate, TemplateEditor, TemplatePicker } from "./Templates";
 import { IconButton } from "./ui";
+import { useShallow } from "zustand/react/shallow";
 
 export function Editors() {
   const editor = useUi((s) => s.editor);
@@ -133,7 +134,7 @@ const templates: { label: string; tagline: string; role: RoleCard }[] = [
 const defaults = { temperature: 0.7, topP: 1, maxTokens: 0, history: 20 };
 
 function AgentEditor({ id, onClose }: { id?: string; onClose: () => void }) {
-  const { agents, providers, defaultModel, addAgent, updateAgent, deleteAgent } = useData();
+  const { agents, providers, defaultModel, addAgent, updateAgent, deleteAgent } = useData(useShallow((s) => ({ agents: s.agents, providers: s.providers, defaultModel: s.defaultModel, addAgent: s.addAgent, updateAgent: s.updateAgent, deleteAgent: s.deleteAgent })));
   const open = useUi((s) => s.open);
   const existing = agents.find((a) => a.id === id);
   const [draft, setDraft] = useState<Agent>(
@@ -264,7 +265,7 @@ function AgentEditor({ id, onClose }: { id?: string; onClose: () => void }) {
 // ---------- group ----------
 
 function GroupEditor({ id, onClose }: { id?: string; onClose: () => void }) {
-  const { agents, groups, addGroup, updateGroup, deleteGroup } = useData();
+  const { agents, groups, addGroup, updateGroup, deleteGroup } = useData(useShallow((s) => ({ agents: s.agents, groups: s.groups, addGroup: s.addGroup, updateGroup: s.updateGroup, deleteGroup: s.deleteGroup })));
   const open = useUi((s) => s.open);
   const edit = useUi((s) => s.edit);
   const existing = groups.find((g) => g.id === id);

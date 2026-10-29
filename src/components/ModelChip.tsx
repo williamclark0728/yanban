@@ -3,10 +3,11 @@ import { ChevronDown } from "lucide-react";
 import { resolveModel, TRIAL_ID, useData, useUi } from "../store";
 import type { Agent } from "../types";
 import { ModelList } from "./ModelPicker";
+import { useShallow } from "zustand/react/shallow";
 
 /** Composer button showing the agent's model; opens a list to switch it for this agent only. */
 export function ModelChip({ agent }: { agent: Agent }) {
-  const { providers, defaultModel, updateAgent, trial } = useData();
+  const { providers, defaultModel, updateAgent, trial } = useData(useShallow((s) => ({ providers: s.providers, defaultModel: s.defaultModel, updateAgent: s.updateAgent, trial: s.trial })));
   // Open state lives in the store so the /model command can open it.
   const open = useUi((s) => s.chip === "model");
   const setOpen = (v: boolean) => useUi.getState().setChip(v ? "model" : null);

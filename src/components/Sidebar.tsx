@@ -1,15 +1,16 @@
 import clsx from "clsx";
 import { Bot, CircleHelp, LayoutTemplate, Plus, Quote, Search, Settings, Users, X } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { memo, useMemo, useState, type ReactNode } from "react";
 import { searchMessages, type Hit } from "../lib/memory";
 import { listTime } from "../lib/time";
 import { useData, usePrefs, useUi } from "../store";
-import type { ChatRef, Message } from "../types";
+import type { Agent, ChatRef, Group, Message } from "../types";
 import { BotAvatar, GroupAvatar, MeAvatar } from "./Avatar";
 import { IconButton } from "./ui";
+import { useShallow } from "zustand/react/shallow";
 
 export function Sidebar() {
-  const { agents, groups, messages, unread } = useData();
+  const { agents, groups, messages, unread } = useData(useShallow((s) => ({ agents: s.agents, groups: s.groups, messages: s.messages, unread: s.unread })));
   const { active, open, search, setSearch, openSettings, edit, focusMessage, quoteInto } = useUi();
   const mode = usePrefs((s) => s.mode);
   const name = usePrefs((s) => s.name.trim());
@@ -31,15 +32,6 @@ export function Sidebar() {
 
   // Searching also looks through every message, so an old answer can be found again.
   const hits = useMemo(() => (q ? searchMessages(q, 40) : []), [q, messages]);
-
-  const preview = (m?: Message) => {
-    if (!m) return { text: "", who: "", time: "" };
-    const time = listTime(m.at);
-    if (m.kind === "round") return { text: `第 ${m.round} 轮 · ${m.note}`, who: "", time };
-    if (m.kind === "text" && m.status === "error") return { text: m.error?.message ?? "", who: "", time };
-    const plain = m.text.replace(/[*_>#`]/g, "").replace(/\s+/g, " ").trim();
-    return { text: plain || (m.kind === "text" && m.status === "streaming" ? "正在输入…" : ""), who: m.sender === "me" ? "" : agents.find((a) => a.id === m.sender)?.name ?? "", time };
-  };
 
   return (
     <aside className="flex h-full w-full flex-col bg-sidebar md:w-[300px] md:shrink-0 md:border-r md:border-line">
@@ -97,42 +89,20 @@ export function Sidebar() {
       </header>
 
       <nav className="scroll flex-1 px-2 pb-2">
-        {rows.map((r) => {
-          const p = preview(r.last);
-          const selected = active?.id === r.ref.id;
-          const count = unread[r.ref.id] ?? 0;
-          const members = r.group ? r.group.memberIds.map((m) => agents.find((a) => a.id === m)!).filter(Boolean) : [];
-          return (
-            <button
-              key={r.ref.id}
-              type="button"
-              onClick={() => open(r.ref)}
-              className={clsx(
-                "flex w-full items-center gap-3 rounded-2xl px-2.5 py-2.5 text-left transition-colors",
-                selected ? "bg-active" : "hover:bg-hover",
-              )}
-            >
-              {r.group ? <GroupAvatar members={members} size={46} /> : <BotAvatar agent={r.agent!} size={46} />}
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="truncate font-semibold">{r.name}</span>
-                  <span className="ml-auto shrink-0 text-xs text-fg-3">{p.time}</span>
-                </div>
-                <div className="mt-0.5 flex items-center gap-2">
-                  <span className="truncate text-[13.5px] text-fg-2">
-                    {r.group && p.who && <span className="text-fg">{p.who}：</span>}
-                    {p.text || (r.agent ? r.agent.tagline : "")}
-                  </span>
-                  {count > 0 && (
-                    <span className="ml-auto grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-badge px-1.5 text-[11px] font-semibold text-white">
-                      {count}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </button>
-          );
-        })}
+        {rows.map((r) => (
+          <ChatRow
+            key={r.ref.id}
+            chat={r.ref}
+            name={r.name}
+            group={r.group}
+            agent={r.agent}
+            agents={agents}
+            last={r.last}
+            selected={active?.id === r.ref.id}
+            count={unread[r.ref.id] ?? 0}
+            onOpen={open}
+          />
+        ))}
         {rows.length === 0 && !hits.length && <p className="px-4 py-10 text-center text-sm text-fg-3">没有匹配的会话或消息</p>}
         {hits.length > 0 && (
           <>
@@ -175,6 +145,65 @@ export function Sidebar() {
 }
 
 /** The whole message a hit points to, labelled with where it was said, for quoting into the open chat. */
+function preview(m: Message | undefined, agents: Agent[]) {
+  if (!m) return { text: "", who: "", time: "" };
+  const time = listTime(m.at);
+  if (m.kind === "round") return { text: `第 ${m.round} 轮 · ${m.note}`, who: "", time };
+  if (m.kind === "text" && m.status === "error") return { text: m.error?.message ?? "", who: "", time };
+  const plain = m.text.replace(/[*_>#`]/g, "").replace(/\s+/g, " ").trim();
+  return { text: plain || (m.kind === "text" && m.status === "streaming" ? "正在输入…" : ""), who: m.sender === "me" ? "" : agents.find((a) => a.id === m.sender)?.name ?? "", time };
+}
+
+/** One chat in the list; redrawn only when its own last message, name, unread count or selection changes. */
+const ChatRow = memo(function ChatRow({
+  chat,
+  name,
+  group,
+  agent,
+  agents,
+  last,
+  selected,
+  count,
+  onOpen,
+}: {
+  chat: ChatRef;
+  name: string;
+  group?: Group;
+  agent?: Agent;
+  agents: Agent[];
+  last?: Message;
+  selected: boolean;
+  count: number;
+  onOpen: (chat: ChatRef) => void;
+}) {
+  const p = preview(last, agents);
+  const members = group ? group.memberIds.map((m) => agents.find((a) => a.id === m)!).filter(Boolean) : [];
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(chat)}
+      className={clsx("flex w-full items-center gap-3 rounded-2xl px-2.5 py-2.5 text-left transition-colors", selected ? "bg-active" : "hover:bg-hover")}
+    >
+      {group ? <GroupAvatar members={members} size={46} /> : <BotAvatar agent={agent!} size={46} />}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate font-semibold">{name}</span>
+          <span className="ml-auto shrink-0 text-xs text-fg-3">{p.time}</span>
+        </div>
+        <div className="mt-0.5 flex items-center gap-2">
+          <span className="truncate text-[13.5px] text-fg-2">
+            {group && p.who && <span className="text-fg">{p.who}：</span>}
+            {p.text || (agent ? agent.tagline : "")}
+          </span>
+          {count > 0 && (
+            <span className="ml-auto grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-badge px-1.5 text-[11px] font-semibold text-white">{count}</span>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+});
+
 function quoteOf(h: Hit, messages: Message[]) {
   const m = messages.find((x) => x.id === h.id);
   const text = m && m.kind !== "round" ? m.text : h.snippet;

@@ -16,6 +16,7 @@ import { isDesktop, setZoom } from "./lib/desktop";
 import { refreshJobs } from "./lib/jobs";
 import { startScheduler } from "./lib/schedule";
 import { CHAT_WIDTH_MAX, stepZoom, useData, usePrefs, useUi } from "./store";
+import { useShallow } from "zustand/react/shallow";
 
 function useMedia(query: string) {
   return useSyncExternalStore(
@@ -91,7 +92,7 @@ export default function App() {
   useTheme();
   useZoom();
   const { active, panelOpen, togglePanel, aside, closeAside, pane, closePane } = useUi();
-  const { loaded, load } = useData();
+  const { loaded, load } = useData(useShallow((s) => ({ loaded: s.loaded, load: s.load })));
   const wide = useMedia("(min-width: 1280px)");
 
   useEffect(() => {

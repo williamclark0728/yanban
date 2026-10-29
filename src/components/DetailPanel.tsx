@@ -1,7 +1,8 @@
-import { ChevronRight, LayoutTemplate, Minus, Pencil, Plus, X } from "lucide-react";
+import clsx from "clsx";
+import { ChevronDown, LayoutTemplate, Minus, Pencil, Plus, X } from "lucide-react";
 import { useState } from "react";
 import { MAX_ROUNDS, resolveModel, usePrefs, useData, useUi, type PanelTab } from "../store";
-import { ModelPicker } from "./ModelPicker";
+import { ModelList, ModelPicker } from "./ModelPicker";
 import type { Agent, Group } from "../types";
 import { BotAvatar, GroupAvatar } from "./Avatar";
 import { DangerButton } from "./Editors";
@@ -10,9 +11,10 @@ import { Card, IconButton, Label, Segmented, Switch, Tabs } from "./ui";
 import { DESKTOP_DOWNLOAD, isDesktop, pickFolder } from "../lib/desktop";
 import { nativeSearch } from "../lib/llm";
 import { searchReady } from "../lib/search";
+import { useShallow } from "zustand/react/shallow";
 
 export function DetailPanel() {
-  const { agents, groups } = useData();
+  const { agents, groups } = useData(useShallow((s) => ({ agents: s.agents, groups: s.groups })));
   const { active, panelTab, showPanel, togglePanel, edit } = useUi();
   const group = active?.kind === "group" ? groups.find((g) => g.id === active.id) : undefined;
   const agent = active?.kind === "agent" ? agents.find((a) => a.id === active.id) : undefined;
@@ -81,7 +83,7 @@ export function DetailPanel() {
 const nameOf = (agents: Agent[], id: string) => agents.find((a) => a.id === id)?.name ?? id;
 
 function GroupInfo({ group }: { group: Group }) {
-  const { setConsensus, setMaxRounds, updateGroup, runs } = useData();
+  const { setConsensus, setMaxRounds, updateGroup, runs } = useData(useShallow((s) => ({ setConsensus: s.setConsensus, setMaxRounds: s.setMaxRounds, updateGroup: s.updateGroup, runs: s.runs })));
   const dev = usePrefs((s) => s.mode === "dev");
   const groupRuns = runs.filter((r) => r.groupId === group.id);
   return (
@@ -157,37 +159,69 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** Members, each with its model: the model can be changed here without opening the member's own chat. */
 function MemberList({ group, members }: { group: Group; members: Agent[] }) {
   const open = useUi((s) => s.open);
-  const dev = usePrefs((s) => s.mode === "dev");
+  const { providers, defaultModel, updateAgent } = useData(useShallow((s) => ({ providers: s.providers, defaultModel: s.defaultModel, updateAgent: s.updateAgent })));
+  const [picking, setPicking] = useState<string | null>(null);
+  const fallback = resolveModel(undefined, providers, defaultModel);
   return (
-    <Card className="divide-y divide-line">
-      {members.map((m) => (
-        <button
-          key={m.id}
-          type="button"
-          onClick={() => open({ kind: "agent", id: m.id })}
-          className="flex w-full items-center gap-3 px-4 py-3 text-left first:rounded-t-2xl last:rounded-b-2xl hover:bg-hover"
-        >
-          <BotAvatar agent={m} size={36} />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="font-medium">{m.name}</span>
-              {m.id === group.leadId && (
-                <span className="rounded-md bg-accent-soft px-1.5 py-px text-[11px] font-medium text-accent-text">主持</span>
+    <>
+      <Card className="divide-y divide-line">
+        {members.map((m) => {
+          const target = resolveModel(m, providers, defaultModel);
+          const inherits = !m.model || !target || target.provider.id !== m.model.provider;
+          return (
+            <div key={m.id}>
+              <div className="flex items-center gap-2 px-4 py-3">
+                <button type="button" onClick={() => open({ kind: "agent", id: m.id })} title={`和${m.name}私聊`} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                  <BotAvatar agent={m} size={36} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-medium hover:underline">{m.name}</span>
+                      {m.id === group.leadId && (
+                        <span className="shrink-0 rounded-md bg-accent-soft px-1.5 py-px text-[11px] font-medium text-accent-text">主持</span>
+                      )}
+                    </div>
+                    <div className="truncate text-[13px] text-fg-3">{m.tagline}</div>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPicking(picking === m.id ? null : m.id)}
+                  aria-label={`更换${m.name}的模型`}
+                  aria-expanded={picking === m.id}
+                  className="flex max-w-[48%] shrink-0 items-center gap-1 rounded-full bg-raise-2 py-1 pl-2.5 pr-2 text-[12px] hover:bg-active"
+                >
+                  <span className={clsx("size-1.5 shrink-0 rounded-full", target ? "bg-ok" : "bg-fg-3")} />
+                  <span className="truncate font-mono">{target?.modelId ?? "未选择"}</span>
+                  {target && inherits && <span className="shrink-0 text-fg-3">默认</span>}
+                  <ChevronDown size={13} className={clsx("shrink-0 text-fg-3 transition-transform", picking === m.id && "rotate-180")} />
+                </button>
+              </div>
+              {picking === m.id && (
+                <div className="border-t border-line p-2">
+                  <ModelList
+                    value={m.model}
+                    inheritLabel={fallback ? `跟随默认（${fallback.modelId}）` : "跟随默认"}
+                    onPick={(model) => {
+                      updateAgent(m.id, { model });
+                      setPicking(null);
+                    }}
+                  />
+                </div>
               )}
             </div>
-            <div className="truncate text-[13px] text-fg-3">{dev ? (m.model?.id ?? "默认模型") : m.tagline}</div>
-          </div>
-          <ChevronRight size={16} className="text-fg-3" />
-        </button>
-      ))}
-    </Card>
+          );
+        })}
+      </Card>
+      <p className="mt-2 px-1 text-[13px] leading-relaxed text-fg-3">点右侧的模型可直接更换；点名字进入私聊。换的是这位成员自己的模型，在私聊和其他群里也会生效。</p>
+    </>
   );
 }
 
 function AgentInfo({ agent }: { agent: Agent }) {
-  const { providers, defaultModel, setParam, updateAgent, search, siteSearch } = useData();
+  const { providers, defaultModel, setParam, updateAgent, search, siteSearch } = useData(useShallow((s) => ({ providers: s.providers, defaultModel: s.defaultModel, setParam: s.setParam, updateAgent: s.updateAgent, search: s.search, siteSearch: s.siteSearch })));
   const openSettings = useUi((s) => s.openSettings);
   const dev = usePrefs((s) => s.mode === "dev");
   const searchOk = searchReady(search) || !!siteSearch;

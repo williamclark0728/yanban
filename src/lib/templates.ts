@@ -76,6 +76,52 @@ const author: TemplateMember = {
   params: { temperature: 0.5 },
 };
 
+/** Exam review: one solves, one checks the answer independently, one writes practice questions when asked. */
+const solver: TemplateMember = {
+  key: "solver",
+  name: "解题人",
+  color: "sky",
+  look: -0.15,
+  tagline: "讲清考点和思路，写出完整解题步骤",
+  role: {
+    duty: "解答用户给的题目，按这个顺序写：① 考点：这题考哪几个知识点、用到哪些公式或定理；② 思路：先做什么、为什么这样做；③ 完整步骤：每一步写出公式、代入和中间结果，不跳步；④ 最终答案：单独一行加粗，带单位；⑤ 易错点：这类题常见的 1–3 个错误。",
+    scope: "用户给了课件、笔记或资料库时，优先用其中的方法、符号和结论。公式用 LaTeX（行内 $…$，独立公式 $$…$$）。题目条件不全或有歧义时，写明你的假设再解。不确定的结论如实说明，不编造公式。",
+    io: "输入：一道题（文字或图片），可能附带课件。输出：考点 / 思路 / 步骤 / 答案 / 易错点 五部分的完整解答。",
+    protocol: "验算员指出问题时逐条核对：确实错了就改正并说明错在哪一步，没错就写出理由。",
+  },
+  params: { temperature: 0.3 },
+};
+
+const verifier: TemplateMember = {
+  key: "verifier",
+  name: "验算员",
+  color: "teal",
+  look: 0.25,
+  tagline: "独立验算答案，逐步核对推导",
+  role: {
+    duty: "先不看解答，自己用另一种方法或估算算出答案，再和解题人的答案对比；然后逐步检查推导：公式是否用对、代入和计算是否正确、单位和量纲是否一致、结果在特殊情况或极限情况下是否合理。",
+    scope: "只指出有依据的问题，写明是第几步、错在哪、正确应该是什么；表述方式不同但结果正确不算问题。",
+    io: "输入：题目和解题人的解答。输出：你的独立结果，以及逐条问题清单。",
+    protocol: "答案一致且步骤无误时明确写“验算通过”。",
+  },
+  params: { temperature: 0.2 },
+};
+
+const examiner: TemplateMember = {
+  key: "examiner",
+  name: "出题人",
+  color: "amber",
+  look: 0.45,
+  tagline: "出同类练习题，答案放在最后",
+  role: {
+    duty: "按原题的考点出 2–3 道同类练习题，难度由浅到深：一道换数字、一道换问法、一道综合。",
+    scope: "题目条件要完整、可解，答案你要自己算过。",
+    io: "输入：原题。输出：练习题，最后单独一节「参考答案」给出每题的简要步骤和答案。",
+    protocol: "只在用户要练习题时参与。",
+  },
+  params: { temperature: 0.6 },
+};
+
 export const builtInTemplates: TeamTemplate[] = [
   {
     id: "paper",
@@ -109,6 +155,23 @@ export const builtInTemplates: TeamTemplate[] = [
       "1. 把用户的主题拆成 2–4 个互不重叠的子问题，分给检索员甲和检索员乙（都是 produce），task 里写清各自负责哪几个子问题，两人同时开始。",
       "2. 撰写人（produce）的 after 写「检索员甲、检索员乙」，等两人都完成后把材料写成一篇报告，引用编号连续，末尾列参考文献。",
       "3. 核查员（review）核对报告里每条引用是否在检索员的来源里、数字是否一致、有没有没出处的结论。",
+    ].join("\n"),
+    builtIn: true,
+  },
+  {
+    id: "exam",
+    name: "期末复习组",
+    description: "发一道题，解题人讲考点、思路和完整步骤，验算员独立验算，需要时出同类练习题",
+    members: [butler, solver, verifier, examiner],
+    leadKey: butler.key,
+    maxRounds: 2,
+    consensus: "strict",
+    guide: [
+      "1. 用户发来题目（或问某个知识点、公式怎么用）：解题人 produce，写出考点、思路、完整步骤、最终答案和易错点。",
+      "2. 验算员 review：独立算一遍答案，再逐步核对解题人的推导和计算。",
+      "3. 只有用户要练习题、类似题或“举一反三”时，才派出题人 produce：直接根据原题出题，和解题人同时开始，不写 after，task 里也不要提解题人。验算员同时审查两人的产出。不要练习题就不派出题人。",
+      "4. 用户一次发了几道题时，让解题人按题号逐题解答。",
+      "5. 用户只是闲聊或问复习安排，你直接回答，不用分工。",
     ].join("\n"),
     builtIn: true,
   },

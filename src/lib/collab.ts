@@ -75,9 +75,16 @@ function extractJson(raw: string): Record<string, unknown> | null {
   }
 }
 
+/** A task that checks someone else's work, whatever type the lead gave it. */
+const CHECKS = /审查|审核|审阅|审稿|核查|核对|核实|校对|校验|复核|验算|把关|挑错|找错|纠错|检查/;
+const OF_WORK = /稿|产出|答案|解答|结果|报告|文章|内容|步骤|推导|计算/;
+
 /**
  * Reads the lead's JSON plan; tolerant of code fences, extra prose and Chinese labels.
- * `after` names one or more producers ("甲、乙" or a list); only ones listed earlier count, so waits can't form a loop.
+ * `after` names one or more producers ("甲、乙" or a list). Models often get the order wrong, so outside "speak" mode:
+ * a "produce" task that checks someone's work becomes a review (reviews start after every producer is done),
+ * and a producer whose task names another producer ("根据检索员甲的资料写稿") waits for them.
+ * Producers are put in an order where everyone comes after those they wait for; a wait that would close a loop is dropped.
  */
 export function parsePlan(raw: string, members: Agent[]): { reply: string; speak: boolean; assignments: Assignment[] } | null {
   const data = extractJson(raw);
@@ -107,13 +114,33 @@ export function parsePlan(raw: string, members: Agent[]): { reply: string; speak
     const prev = merged.get(agent.id);
     merged.set(agent.id, { agent, type: prev?.type ?? type, task: prev ? `${prev.task}；${task}` : task, wait: prev?.wait || clean(a?.after) });
   }
+  const speak = /speak|发言/i.test(String(data.mode ?? ""));
   const list = [...merged.values()];
-  const assignments = list.map(({ wait, ...a }, i) => {
-    const before = wait && a.type === "produce" ? named(wait) : [];
-    const after = before.filter((b) => list.slice(0, i).some((x) => x.agent.id === b.id && x.type === "produce"));
+  if (!speak) {
+    const mentionsOther = (a: (typeof list)[number]) => list.some((x) => x !== a && a.task.includes(x.agent.name));
+    const checking = list.filter((a) => a.type === "produce" && CHECKS.test(a.task) && (OF_WORK.test(a.task) || mentionsOther(a)));
+    // Something must still be produced for the reviews to check.
+    if (list.some((a) => a.type === "produce" && !checking.includes(a))) for (const a of checking) a.type = "review";
+  }
+  const producers = list.filter((a) => a.type === "produce");
+  const waitsFor = new Map(
+    producers.map((a) => {
+      const others = producers.filter((x) => x !== a).map((x) => x.agent);
+      const wanted = a.wait ? named(a.wait) : speak ? [] : others.filter((m) => a.task.includes(m.name));
+      return [a.agent.id, wanted.filter((m) => others.includes(m))];
+    }),
+  );
+  const ordered: typeof producers = [];
+  for (let rest = producers; rest.length; ) {
+    const ready = rest.find((a) => waitsFor.get(a.agent.id)!.every((m) => ordered.some((x) => x.agent === m))) ?? rest[0];
+    ordered.push(ready);
+    rest = rest.filter((a) => a !== ready);
+  }
+  const assignments = [...ordered, ...list.filter((a) => a.type !== "produce")].map(({ wait: _, ...a }, i) => {
+    const after = a.type === "produce" ? waitsFor.get(a.agent.id)!.filter((m) => ordered.slice(0, i).some((x) => x.agent === m)) : [];
     return after.length ? { ...a, after } : a;
   });
-  return { reply: typeof data.reply === "string" ? data.reply.trim() : "", speak: /speak|发言/i.test(String(data.mode ?? "")), assignments };
+  return { reply: typeof data.reply === "string" ? data.reply.trim() : "", speak, assignments };
 }
 
 export function issueStatus(value: unknown): IssueStatus {

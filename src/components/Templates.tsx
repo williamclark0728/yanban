@@ -7,6 +7,7 @@ import type { Agent, TeamTemplate, TemplateMember } from "../types";
 import { BotAvatar, GroupAvatar } from "./Avatar";
 import { Actions, DangerButton, Field, inputCls, Modal } from "./Editors";
 import { IconButton, Segmented } from "./ui";
+import { useShallow } from "zustand/react/shallow";
 
 /** Template members look like agents to the avatar components. */
 const asAgents = (members: TemplateMember[]) => members.map((m) => ({ ...m, id: m.key }) as unknown as Agent);
@@ -16,7 +17,7 @@ const rules = (t: Pick<TeamTemplate, "consensus" | "maxRounds">) => `${t.consens
 // ---------- pick a template, then create a group from it ----------
 
 export function TemplatePicker({ onClose }: { onClose: () => void }) {
-  const { templates, groups } = useData();
+  const { templates, groups } = useData(useShallow((s) => ({ templates: s.templates, groups: s.groups })));
   const [picked, setPicked] = useState<TeamTemplate | null>(null);
   const [name, setName] = useState("");
 
@@ -96,7 +97,7 @@ function CreateFromTemplate({
   onBack: () => void;
   onClose: () => void;
 }) {
-  const { agents } = useData();
+  const { agents } = useData(useShallow((s) => ({ agents: s.agents })));
   const open = useUi((s) => s.open);
   const created = t.members.filter((m) => !existingFor(m, agents)).length;
 
@@ -161,7 +162,7 @@ function MemberRows({ template: t, agents, onRemove }: { template: TeamTemplate;
 // ---------- save a group as a template ----------
 
 export function SaveTemplate({ groupId, onClose }: { groupId: string; onClose: () => void }) {
-  const { groups, agents, saveTemplate } = useData();
+  const { groups, agents, saveTemplate } = useData(useShallow((s) => ({ groups: s.groups, agents: s.agents, saveTemplate: s.saveTemplate })));
   const group = groups.find((g) => g.id === groupId);
   const [name, setName] = useState(group?.name ?? "");
   const [description, setDescription] = useState("");
@@ -205,7 +206,7 @@ export function SaveTemplate({ groupId, onClose }: { groupId: string; onClose: (
 // ---------- edit or delete one of the user's templates ----------
 
 export function TemplateEditor({ id, onClose }: { id: string; onClose: () => void }) {
-  const { templates, saveTemplate, deleteTemplate } = useData();
+  const { templates, saveTemplate, deleteTemplate } = useData(useShallow((s) => ({ templates: s.templates, saveTemplate: s.saveTemplate, deleteTemplate: s.deleteTemplate })));
   const edit = useUi((s) => s.edit);
   const found = templates.find((t) => t.id === id);
   const [draft, setDraft] = useState<TeamTemplate | undefined>(found);

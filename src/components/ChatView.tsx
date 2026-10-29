@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import { ChevronDown, ChevronLeft, ChevronUp, ClipboardList, Clock, CornerDownRight, FileUp, Info, Lightbulb, NotebookPen, PanelRight, Pencil, PlugZap, Quote, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { setPlanMode, usePlanMode } from "../lib/agentTools";
 import { compact, newTopic, stop, useBusy } from "../lib/chat";
 import { isDesktop } from "../lib/desktop";
@@ -21,6 +21,7 @@ import { DEMO_IDS } from "../lib/seed";
 import { ModelChip } from "./ModelChip";
 import { TaskBoard } from "./TaskBoard";
 import { IconButton } from "./ui";
+import { useShallow } from "zustand/react/shallow";
 
 const senderOf = (m?: Message) => (m && (m.kind === "text" || m.kind === "review") ? m.sender : undefined);
 
@@ -84,8 +85,11 @@ function PlanChip({ chat }: { chat: string }) {
   );
 }
 
+/** Messages drawn when a chat opens, and how many more each "show earlier" adds. */
+const PAGE = 60;
+
 export function ChatView() {
-  const { agents, groups, messages, providers, defaultModel, markRead, updateAgent, skills } = useData();
+  const { agents, groups, messages, providers, defaultModel, markRead, updateAgent, skills } = useData(useShallow((s) => ({ agents: s.agents, groups: s.groups, messages: s.messages, providers: s.providers, defaultModel: s.defaultModel, markRead: s.markRead, updateAgent: s.updateAgent, skills: s.skills })));
   const { active, back, togglePanel, panelOpen, openSettings, openAside, setChip, setHelp, focus, quote, focusMessage, quoteInto } = useUi();
   const dev = usePrefs((s) => s.mode === "dev");
   const busy = useBusy((s) => (active ? !!s[active.id] : false));
@@ -100,6 +104,11 @@ export function ChatView() {
   const [goalEdit, setGoalEdit] = useState(false);
   const flashTimer = useRef(0);
   const stick = useRef(true);
+  // Where each chat's drawn messages begin: drawing hundreds of formatted replies at once is slow, so a chat
+  // opens on its latest ones. The start stays put as new messages arrive, so what the user reads doesn't move.
+  const firstShown = useRef<Record<string, string>>({});
+  const [, redraw] = useState(0);
+  const keepFromBottom = useRef<number | null>(null);
 
   // Selecting text in a reply shows the quote / explain toolbar.
   useEffect(() => {
@@ -136,6 +145,33 @@ export function ChatView() {
   const target = agent ? resolveModel(agent, providers, defaultModel) : null;
   const tail = list.at(-1);
   const tailSize = tail && "text" in tail ? tail.text.length : 0;
+  let start = list.findIndex((m) => m.id === firstShown.current[chatId]);
+  if (start < 0) {
+    start = Math.max(0, list.length - PAGE);
+    if (list.length) firstShown.current[chatId] = list[start].id;
+  }
+  const showFrom = (at: number) => {
+    firstShown.current[chatId] = list[Math.max(0, at)].id;
+    redraw((n) => n + 1);
+  };
+  const showEarlier = () => {
+    const el = scroller.current;
+    if (el) keepFromBottom.current = el.scrollHeight - el.scrollTop;
+    showFrom(start - PAGE);
+  };
+
+  // Earlier messages appear above without moving what the user is reading.
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (el && keepFromBottom.current !== null) el.scrollTop = el.scrollHeight - keepFromBottom.current;
+    keepFromBottom.current = null;
+  }, [start]);
+
+  // A message picked in the history search may be further back than what is drawn.
+  useEffect(() => {
+    const at = focus ? list.findIndex((m) => m.id === focus.id) : -1;
+    if (at >= 0 && at < start) showFrom(at - 10);
+  }, [focus, chatId, list, start]);
 
   useEffect(() => {
     if (chatId) markRead(chatId);
@@ -160,7 +196,7 @@ export function ChatView() {
     focusMessage(null);
     clearTimeout(flashTimer.current);
     flashTimer.current = window.setTimeout(() => setFlash(null), 1800);
-  }, [focus, chatId, list.length, focusMessage]);
+  }, [focus, chatId, list.length, focusMessage, start]);
 
   // An old message quoted from the history search goes into this chat's composer.
   useEffect(() => {
@@ -285,7 +321,15 @@ export function ChatView() {
               <p className="mt-1 text-fg-2">{agent.tagline}</p>
             </div>
           )}
-          {list.map((m, i) => {
+          {start > 0 && (
+            <div className="mb-4 flex justify-center">
+              <button type="button" onClick={showEarlier} className="rounded-full bg-raise-2 px-3.5 py-1.5 text-[13px] font-medium text-fg-2 hover:bg-active">
+                显示更早的 {Math.min(start, PAGE)} 条消息（还有 {start} 条）
+              </button>
+            </div>
+          )}
+          {list.slice(start).map((m, j) => {
+            const i = start + j;
             const prev = list[i - 1];
             const next = list[i + 1];
             const s = senderOf(m);
@@ -297,7 +341,7 @@ export function ChatView() {
             );
             // Answers from several models to one question sit side by side, drawn once at the first of them.
             if (m.kind === "text" && m.compare) {
-              if (list.findIndex((x) => x.kind === "text" && x.compare === m.compare) !== i) return null;
+              if (list.findIndex((x, k) => k >= start && x.kind === "text" && x.compare === m.compare) !== i) return null;
               const replies = list.filter((x): x is TextMessage => x.kind === "text" && x.compare === m.compare);
               return (
                 <div key={m.id} className={clsx("rounded-2xl transition-colors duration-700", replies.some((r) => r.id === flash) && "bg-accent-soft")}>

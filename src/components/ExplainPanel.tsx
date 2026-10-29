@@ -10,6 +10,7 @@ import { BotAvatar } from "./Avatar";
 import { Composer, type ComposerHandle } from "./Composer";
 import { RichText } from "./MessageItem";
 import { IconButton } from "./ui";
+import { useShallow } from "zustand/react/shallow";
 
 interface Turn {
   id: string;
@@ -43,7 +44,7 @@ const RULES = [
  */
 export function ExplainPanel({ aside }: { aside: Aside }) {
   const close = useUi((s) => s.closeAside);
-  const { messages, agents, providers, defaultModel, addMessage } = useData();
+  const { messages, agents, providers, defaultModel, addMessage } = useData(useShallow((s) => ({ messages: s.messages, agents: s.agents, providers: s.providers, defaultModel: s.defaultModel, addMessage: s.addMessage })));
   const mainBusy = useBusy((s) => !!s[aside.chat]);
   const found = messages.find((m) => m.id === aside.messageId);
   const source = found && found.kind !== "round" ? found : undefined;

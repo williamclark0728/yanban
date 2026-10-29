@@ -16,6 +16,7 @@ import { VersionRow } from "./UpdateCard";
 import { UsagePanel } from "./UsagePanel";
 import { ModelPicker } from "./ModelPicker";
 import { IconButton, Segmented, Switch } from "./ui";
+import { useShallow } from "zustand/react/shallow";
 
 export function SettingsDialog() {
   const { settingsOpen, settingsTab, openSettings, closeSettings } = useUi();
@@ -120,7 +121,7 @@ export function Row({ title, desc, children }: { title: string; desc?: string; c
 function General() {
   const { mode, setMode, theme, setTheme, name, setName, approval, setApproval, fontSize, steps, zoom, suggest, chatWidth, confirmLinks, set } = usePrefs();
   const setHelp = useUi((s) => s.setHelp);
-  const { agents, groups, restoreExamples } = useData();
+  const { agents, groups, restoreExamples } = useData(useShallow((s) => ({ agents: s.agents, groups: s.groups, restoreExamples: s.restoreExamples })));
   const [restoring, setRestoring] = useState(false);
   const missing =
     seedAgents.filter((a) => !agents.some((x) => x.id === a.id)).length + seedGroups.filter((g) => !groups.some((x) => x.id === g.id)).length;
@@ -290,7 +291,7 @@ function General() {
 }
 
 function Providers() {
-  const { providers, defaultModel, setDefaultModel, trial } = useData();
+  const { providers, defaultModel, setDefaultModel, trial } = useData(useShallow((s) => ({ providers: s.providers, defaultModel: s.defaultModel, setDefaultModel: s.setDefaultModel, trial: s.trial })));
   const { editProvider, setEditProvider } = useUi();
 
   if (editProvider) {
@@ -453,7 +454,7 @@ export function SecretInput({ value, onChange, placeholder }: { value: string; o
 }
 
 function SearchSettings() {
-  const { search, saveSearch, agents, siteSearch } = useData();
+  const { search, saveSearch, agents, siteSearch } = useData(useShallow((s) => ({ search: s.search, saveSearch: s.saveSearch, agents: s.agents, siteSearch: s.siteSearch })));
   const [draft, setDraft] = useState<SearchConfig>(search);
   const [status, setStatus] = useState<Status>(null);
   const meta = searchProviders.find((p) => p.value === draft.provider)!;
@@ -563,7 +564,7 @@ function SearchSettings() {
 const blank: Provider = { id: "", name: "", protocol: "openai-chat", baseUrl: "", apiKey: "", models: [], enabled: false, custom: true };
 
 function ProviderForm({ provider, onClose }: { provider?: Provider; onClose: () => void }) {
-  const { providers, defaultModel, saveProvider, removeProvider, setDefaultModel } = useData();
+  const { providers, defaultModel, saveProvider, removeProvider, setDefaultModel } = useData(useShallow((s) => ({ providers: s.providers, defaultModel: s.defaultModel, saveProvider: s.saveProvider, removeProvider: s.removeProvider, setDefaultModel: s.setDefaultModel })));
   const isNew = !provider;
   const [draft, setDraft] = useState<Provider>(provider ?? blank);
   const [key, setKey] = useState("");

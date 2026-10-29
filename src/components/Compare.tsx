@@ -4,12 +4,13 @@ import { choose, MAX_COMPARE, sameModel, setCompare, useCompare } from "../lib/c
 import { isReady, resolveModel, useData, useUi } from "../store";
 import type { Agent, Message, ModelRef, TextMessage } from "../types";
 import { MessageItem } from "./MessageItem";
+import { useShallow } from "zustand/react/shallow";
 
 const NONE: ModelRef[] = [];
 
 /** Composer button: pick two or three models to answer side by side. */
 export function CompareChip({ agent }: { agent: Agent }) {
-  const { providers, defaultModel } = useData();
+  const { providers, defaultModel } = useData(useShallow((s) => ({ providers: s.providers, defaultModel: s.defaultModel })));
   const picked = useCompare((s) => s[agent.id] ?? NONE);
   const open = useUi((s) => s.chip === "compare");
   const setOpen = (v: boolean) => useUi.getState().setChip(v ? "compare" : null);

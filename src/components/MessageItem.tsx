@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import { AlertCircle, AlertTriangle, Archive, BookPlus, Brain, Hourglass, Check, CheckCircle2, ChevronDown, Circle, CircleDot, Copy, CornerDownRight, ExternalLink, FileDown, FilePen, FolderOpen, Languages, ListTodo, NotebookPen, Loader2, MessageSquarePlus, Play, RotateCcw, RotateCw, Sparkles, Square, Undo2 } from "lucide-react";
-import { useRef, useState, type ReactNode } from "react";
+import { memo, useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
@@ -580,7 +580,22 @@ function Summary({ msg, agents }: { msg: Extract<Message, { kind: "text" }>; age
   );
 }
 
-export function MessageItem({
+// The last message of each chat, worked out once per change of the message list instead of once per bubble.
+const lastIds = new WeakMap<Message[], Map<string, string>>();
+function lastIdOf(messages: Message[], chat: string) {
+  let map = lastIds.get(messages);
+  if (!map) {
+    map = new Map();
+    for (const m of messages) map.set(m.chat, m.id);
+    lastIds.set(messages, map);
+  }
+  return map.get(chat);
+}
+
+/** Redrawn only when its own message or position changes, so a streaming reply doesn't redraw the whole chat. */
+export const MessageItem = memo(MessageBubble);
+
+function MessageBubble({
   msg,
   agents,
   inGroup,
@@ -597,7 +612,7 @@ export function MessageItem({
   column?: boolean;
 }) {
   const showPanel = useUi((s) => s.showPanel);
-  const isLatest = useData((s) => s.messages.findLast((m) => m.chat === msg.chat)?.id === msg.id);
+  const isLatest = useData((s) => lastIdOf(s.messages, msg.chat) === msg.id);
 
   if (msg.kind === "round") {
     const pass = msg.verdict === "pass" || msg.verdict === "done";

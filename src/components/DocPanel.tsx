@@ -7,6 +7,7 @@ import { download, replyAsDocx } from "../lib/outputs";
 import { useData, useUi } from "../store";
 import { RichText } from "./MessageItem";
 import { IconButton } from "./ui";
+import { useShallow } from "zustand/react/shallow";
 
 const QUICK = ["更简洁", "改得更通顺", "改成学术书面语", "扩写，补充细节"];
 
@@ -19,7 +20,7 @@ interface Pick {
 /** The chat's shared document: edit it, have a selected passage rewritten, export it. */
 export function DocPanel({ chat }: { chat: string }) {
   const doc = useData((s) => s.docs.find((d) => d.chat === chat));
-  const { saveDoc, deleteDoc, agents } = useData();
+  const { saveDoc, deleteDoc, agents } = useData(useShallow((s) => ({ saveDoc: s.saveDoc, deleteDoc: s.deleteDoc, agents: s.agents })));
   const closePane = useUi((s) => s.closePane);
   const [preview, setPreview] = useState(false);
   const [pick, setPick] = useState<Pick | null>(null);

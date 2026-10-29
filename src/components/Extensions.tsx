@@ -12,6 +12,7 @@ import { useData, usePrefs } from "../store";
 import type { McpServer, Memory, Schedule, Skill } from "../types";
 import { Field, inputCls, Row, StatusBox, type Status } from "./SettingsDialog";
 import { IconButton, Segmented, Switch } from "./ui";
+import { useShallow } from "zustand/react/shallow";
 
 const outline = "flex h-10 items-center gap-1.5 rounded-full border border-line-2 px-4 text-sm font-medium hover:bg-hover disabled:opacity-50";
 const solid = "h-10 rounded-full bg-fg px-5 text-sm font-semibold text-bg hover:opacity-90 disabled:opacity-50";
@@ -71,7 +72,7 @@ export function ConfigRow() {
 const folderPicker = { webkitdirectory: "", directory: "" } as InputHTMLAttributes<HTMLInputElement>;
 
 export function SkillSettings() {
-  const { skills, setSkills } = useData();
+  const { skills, setSkills } = useData(useShallow((s) => ({ skills: s.skills, setSkills: s.setSkills })));
   const [editing, setEditing] = useState<Skill | null>(null);
   const [status, setStatus] = useState<Status>(null);
   const folder = useRef<HTMLInputElement>(null);
@@ -211,7 +212,7 @@ const parseHeaders = (text: string) =>
   );
 
 export function McpSettings() {
-  const { mcpServers, setMcpServers } = useData();
+  const { mcpServers, setMcpServers } = useData(useShallow((s) => ({ mcpServers: s.mcpServers, setMcpServers: s.setMcpServers })));
   const [editing, setEditing] = useState<McpServer | null>(null);
 
   if (editing) {
@@ -366,7 +367,7 @@ function McpForm({ server, onSave, onCancel, onDelete }: { server: McpServer; on
 // ---------- memory ----------
 
 export function MemorySettings() {
-  const { memories, setMemories } = useData();
+  const { memories, setMemories } = useData(useShallow((s) => ({ memories: s.memories, setMemories: s.setMemories })));
   const { autoMemory, set } = usePrefs();
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
@@ -454,7 +455,7 @@ export function MemorySettings() {
 const LIBRARY_FILES = /\.(pdf|docx|pptx|xlsx|xls|csv|md|markdown|txt|tex|bib|json|html?)$/i;
 
 export function LibrarySettings() {
-  const { libraries, setLibraries } = useData();
+  const { libraries, setLibraries } = useData(useShallow((s) => ({ libraries: s.libraries, setLibraries: s.setLibraries })));
   const [name, setName] = useState("");
   const [busy, setBusy] = useState<{ lib: string; done: number; total: number; current: string } | null>(null);
   const [status, setStatus] = useState<Status>(null);
@@ -579,7 +580,7 @@ export function LibrarySettings() {
 const when = (t: number) => new Date(t).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 
 export function ScheduleSettings() {
-  const { schedules, setSchedules, agents } = useData();
+  const { schedules, setSchedules, agents } = useData(useShallow((s) => ({ schedules: s.schedules, setSchedules: s.setSchedules, agents: s.agents })));
   const [agentId, setAgentId] = useState(agents[0]?.id ?? "");
   const [time, setTime] = useState("08:00");
   const [repeat, setRepeat] = useState<Schedule["repeat"]>("daily");
