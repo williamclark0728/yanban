@@ -2,16 +2,26 @@
 // against repeated calls, hung tools and huge outputs.
 import { jsonSchema, tool, type ToolSet } from "ai";
 import { create } from "zustand";
-import { useData } from "../store";
-import type { Agent, Todo, ToolTrace } from "../types";
+import { useData, usePrefs } from "../store";
+import type { Agent, AskItem, Todo, ToolTrace } from "../types";
 import { call, isDesktop } from "./desktop";
 import type { Report } from "./tools";
 
-export const AGENT_RULES = [
-  "多步骤的任务（三步以上）先用 update_todos 列出步骤，开始做哪一步就把它标成 in_progress，做完标成 done；简单问答不用列。",
-  "拿不准用户要什么、而且猜错代价大时，用 ask_user 问用户，给出 2–4 个选项；能自己判断的不要问，一次只问一个问题。",
-  "做完一个多步骤、以后可能还会重复做的任务（比如按固定格式整理材料、写某类报告），结尾用一句话提议把这次的做法存成技能，用户点回复下方的「存成技能」就能保存。",
-].join("\n");
+const ASK_RULE = "拿不准用户要什么、而且猜错代价大时，用 ask_user 问用户，给出 2–4 个选项；能自己判断的不要问，一次只问一个问题。";
+
+/** "Ask before starting": a new, sizeable task with key details missing gets one round of questions first. */
+export const CLARIFY_RULE =
+  "用户交代一件新的、要花工夫的事（写报告或文章、调研、做 PPT 或表格、写代码、生成文件），而关键细节没说（范围、篇幅、格式、用途和读者、时间范围、语言风格等），先调用一次 ask_user，用 questions 把要问的一次问完（最多 4 个，每个给 2–4 个选项，用户也可以自己写），拿到回答再动手。要求已经清楚、简单问答、闲聊、或用户说了“直接做”时不要问；已经问过一轮就不要再问。";
+
+export function agentRules(ask = true) {
+  return [
+    "多步骤的任务（三步以上）先用 update_todos 列出步骤，开始做哪一步就把它标成 in_progress，做完标成 done；简单问答不用列。",
+    ask && (usePrefs.getState().clarify ? CLARIFY_RULE : ASK_RULE),
+    "做完一个多步骤、以后可能还会重复做的任务（比如按固定格式整理材料、写某类报告），结尾用一句话提议把这次的做法存成技能，用户点回复下方的「存成技能」就能保存。",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
 
 // ---------- step list ----------
 
@@ -61,31 +71,66 @@ export function answerQuestion(id: string, answer: string | null) {
   resolve(answer);
 }
 
+/** Waits for the user's answer to a question card; null when the reply is stopped first. */
+export function waitAnswer(id: string, signal?: AbortSignal) {
+  return new Promise<string | null>((resolve) => {
+    if (signal?.aborted) return resolve(null);
+    useQuestions.setState({ [id]: resolve });
+    signal?.addEventListener("abort", () => answerQuestion(id, null), { once: true });
+  });
+}
+
+/** Questions as a model wrote them (strings or objects, Chinese keys…) → at most 4 clean ones. */
+export function cleanQuestions(raw: unknown): AskItem[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((q): AskItem | null => {
+      if (typeof q === "string") return q.trim() ? { text: q.trim(), options: [] } : null;
+      if (!q || typeof q !== "object") return null;
+      const o = q as Record<string, unknown>;
+      const text = String(o.question ?? o.text ?? o["问题"] ?? "").trim();
+      const opts = o.options ?? o.choices ?? o["选项"];
+      const options = (Array.isArray(opts) ? opts : []).map((x) => String(x ?? "").trim()).filter(Boolean).slice(0, 6);
+      return text ? { text, options, multi: o.multi === true || o.multiple === true || undefined } : null;
+    })
+    .filter((q): q is AskItem => !!q)
+    .slice(0, 4);
+}
+
 export function askTool(report: Report): ToolSet {
   return {
     ask_user: tool({
-      description: "向用户提一个问题并等待回答。用于需求不明确、有几种做法要用户选的时候。",
-      inputSchema: jsonSchema<{ question: string; options?: string[] }>({
+      description: "向用户提问并等待回答。用于需求不明确、有几种做法要用户选的时候。一个问题用 question + options；要问几件事时用 questions 一次问完。",
+      inputSchema: jsonSchema<{ question?: string; options?: string[]; questions?: { question: string; options?: string[]; multi?: boolean }[] }>({
         type: "object",
         properties: {
-          question: { type: "string", description: "要问的问题，一句话说清楚" },
-          options: { type: "array", items: { type: "string" }, description: "2–4 个可选答案；用户也可以自己写" },
+          question: { type: "string", description: "只问一件事时：要问的问题，一句话说清楚" },
+          options: { type: "array", items: { type: "string" }, description: "只问一件事时：2–4 个可选答案；用户也可以自己写" },
+          questions: {
+            type: "array",
+            description: "要问几件事时：最多 4 个问题，用户在一张卡片里一起回答",
+            items: {
+              type: "object",
+              properties: {
+                question: { type: "string", description: "问题，一句话" },
+                options: { type: "array", items: { type: "string" }, description: "2–4 个可选答案；用户也可以自己写" },
+                multi: { type: "boolean", description: "可以多选时为 true" },
+              },
+              required: ["question"],
+            },
+          },
         },
-        required: ["question"],
       }),
-      execute: async ({ question, options }, { toolCallId, abortSignal }) => {
-        const step: ToolTrace = {
-          id: toolCallId,
-          name: "ask_user",
-          label: question,
-          status: "waiting",
-          question: { text: question, options: (options ?? []).filter(Boolean).slice(0, 6) },
-        };
+      execute: async ({ question, options, questions }, { toolCallId, abortSignal }) => {
+        const many = cleanQuestions(questions);
+        const one = question?.trim();
+        if (!many.length && !one) return "没有给出问题。要提问就写 question，或在 questions 里列出问题。";
+        const step: ToolTrace =
+          many.length > 1 || !one
+            ? { id: toolCallId, name: "ask_user", label: many.length > 1 ? `${many.length} 个问题` : many[0].text, status: "waiting", questions: many }
+            : { id: toolCallId, name: "ask_user", label: one, status: "waiting", question: { text: one, options: (options ?? []).filter(Boolean).slice(0, 6) } };
         report(step);
-        const answer = await new Promise<string | null>((resolve) => {
-          useQuestions.setState({ [toolCallId]: resolve });
-          abortSignal?.addEventListener("abort", () => answerQuestion(toolCallId, null), { once: true });
-        });
+        const answer = await waitAnswer(toolCallId, abortSignal);
         if (answer === null) {
           report({ ...step, status: "error", detail: "已停止" });
           return "用户没有回答。";
@@ -104,7 +149,7 @@ export const usePlanMode = create<Record<string, boolean>>(() => ({}));
 export const setPlanMode = (chat: string, on: boolean) => usePlanMode.setState({ [chat]: on });
 
 /** Tools that only look; plan mode keeps these and drops everything that changes files, sends or installs. */
-const READ_ONLY = new Set(["web_search", "read_page", "list_dir", "read_file", "search_files", "use_skill", "read_skill_file", "ask_user", "update_todos", "remember", "search_chats", "search_library", "delegate", "job_output"]);
+const READ_ONLY = new Set(["web_search", "read_page", "browser_open", "browser_read", "list_dir", "read_file", "search_files", "use_skill", "read_skill_file", "ask_user", "update_todos", "remember", "search_chats", "search_library", "delegate", "job_output"]);
 
 export const readOnly = (tools: ToolSet): ToolSet => Object.fromEntries(Object.entries(tools).filter(([name]) => READ_ONLY.has(name)));
 

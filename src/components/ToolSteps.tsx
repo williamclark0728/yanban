@@ -42,6 +42,8 @@ import type { DiffLine, ToolTrace } from "../types";
 const icons = {
   web_search: Search,
   read_page: FileText,
+  browser_open: Globe,
+  browser_read: Globe,
   dispatch_to_group: Users,
   make_file: FilePlus2,
   use_skill: BookOpen,
@@ -92,6 +94,10 @@ function verb(t: ToolTrace) {
       return `搜索「${t.label}」`;
     case "read_page":
       return `阅读 ${shortUrl(t.label)}`;
+    case "browser_open":
+      return `在内置浏览器打开 ${shortUrl(t.label)}`;
+    case "browser_read":
+      return `读取内置浏览器里的 ${shortUrl(t.label)}`;
     case "make_file":
       return `生成 ${t.label}`;
     case "use_skill":
@@ -103,7 +109,8 @@ function verb(t: ToolTrace) {
     case "dispatch_to_group":
       return t.status === "running" ? `已派到「${t.label}」` : `「${t.label}」`;
     case "ask_user":
-      return t.answer ? `问你：${short(t.label, 40)} → ${short(t.answer, 40)}` : `问你：${short(t.label, 60)}`;
+      if (t.questions && t.questions.length > 1) return t.answer ? `问了你 ${t.questions.length} 个问题，你已回答` : `问你 ${t.questions.length} 个问题`;
+      return t.answer ? `问你：${short(t.label, 40)} → ${short(t.answer.replace(/^1\. .*? → /, ""), 40)}` : `问你：${short(t.label, 60)}`;
     case "remember":
       return `记住：${short(t.label, 60)}`;
     case "search_chats":
@@ -165,6 +172,68 @@ function Question({ step: t }: { step: ToolTrace }) {
             </button>
           </form>
         </>
+      ) : (
+        <div className="text-right text-[12.5px] text-fg-3">已停止</div>
+      )}
+    </div>
+  );
+}
+
+/** Several questions in one card: pick an answer (or several) for each, or write one; then send them together. */
+function Questions({ step: t }: { step: ToolTrace }) {
+  const live = useQuestions((s) => !!s[t.id]);
+  const qs = t.questions ?? [];
+  const [picked, setPicked] = useState<string[][]>(() => qs.map(() => []));
+  const [own, setOwn] = useState<string[]>(() => qs.map(() => ""));
+  const answerOf = (i: number) => [...picked[i], own[i].trim()].filter(Boolean).join("、");
+  const toggle = (i: number, o: string) =>
+    setPicked((p) => p.map((x, j) => (j !== i ? x : qs[i].multi ? (x.includes(o) ? x.filter((y) => y !== o) : [...x, o]) : x[0] === o ? [] : [o])));
+  const done = qs.filter((_, i) => answerOf(i)).length;
+  const submit = () => answerQuestion(t.id, qs.map((q, i) => `${i + 1}. ${q.text} → ${answerOf(i) || "没选，你来定"}`).join("\n"));
+  return (
+    <div className="w-[min(560px,74vw)] max-w-full space-y-3 rounded-xl border border-accent/40 bg-accent-soft p-3">
+      <div className="flex items-center gap-2 text-[13.5px] font-medium">
+        <MessageCircleQuestion size={16} className="shrink-0 text-accent-text" />
+        开工前先问清楚{qs.length > 1 ? `（${qs.length} 个问题）` : ""}
+      </div>
+      {qs.map((q, i) => (
+        <div key={i} className="space-y-1.5">
+          <div className="text-[13.5px]">
+            {qs.length > 1 && <span className="mr-1 text-fg-3">{i + 1}.</span>}
+            {q.text}
+            {q.multi && <span className="ml-1.5 text-[12px] text-fg-3">可多选</span>}
+          </div>
+          {live && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {q.options.map((o) => (
+                <button
+                  key={o}
+                  type="button"
+                  onClick={() => toggle(i, o)}
+                  className={clsx("rounded-full border px-3 py-1 text-[13px]", picked[i].includes(o) ? "border-fg bg-fg text-bg" : "border-line-2 bg-raise hover:bg-hover")}
+                >
+                  {o}
+                </button>
+              ))}
+              <input
+                value={own[i]}
+                onChange={(e) => setOwn((p) => p.map((x, j) => (j === i ? e.target.value : x)))}
+                placeholder={q.options.length ? "其他，自己写" : "写下你的回答"}
+                className="h-8 min-w-[9rem] flex-1 rounded-full border border-line bg-raise px-3 text-[13px] outline-none focus:border-line-2"
+              />
+            </div>
+          )}
+        </div>
+      ))}
+      {live ? (
+        <div className="flex items-center justify-end gap-2">
+          <button type="button" onClick={() => answerQuestion(t.id, "用户没有回答这些问题，按你的判断直接做，并在开头说明你做了哪些假设。")} className="h-8 rounded-full px-3 text-[13px] text-fg-2 hover:bg-hover">
+            跳过，直接做
+          </button>
+          <button type="button" onClick={submit} disabled={!done} className="h-8 rounded-full bg-fg px-4 text-[13px] font-semibold text-bg disabled:opacity-40">
+            {done < qs.length && done > 0 ? `提交（${done}/${qs.length}）` : "提交"}
+          </button>
+        </div>
       ) : (
         <div className="text-right text-[12.5px] text-fg-3">已停止</div>
       )}
@@ -312,7 +381,7 @@ function Step({ step: t, messageId }: { step: ToolTrace; messageId: string }) {
   const openPane = useUi((s) => s.openPane);
   const kept = useData((s) => t.name === "remember" && remembered(s.memories, t.label));
   const [undoError, setUndoError] = useState("");
-  if (t.status === "waiting") return t.name === "ask_user" ? <Question step={t} /> : <Approval step={t} />;
+  if (t.status === "waiting") return t.name === "ask_user" ? t.questions?.length ? <Questions step={t} /> : <Question step={t} /> : <Approval step={t} />;
   const Icon = t.status === "running" ? Loader2 : t.status === "error" ? AlertCircle : icons[t.name];
   const head = (
     <>
@@ -330,7 +399,7 @@ function Step({ step: t, messageId }: { step: ToolTrace; messageId: string }) {
         >
           {verb(t)}
         </button>
-      ) : t.name === "read_page" ? (
+      ) : t.name === "read_page" || t.name === "browser_open" || t.name === "browser_read" ? (
         <a href={t.label} onClick={linkClick(t.label)} title={t.label} className="min-w-0 truncate underline decoration-line-2 underline-offset-2 hover:text-fg">
           {verb(t)}
         </a>
@@ -406,6 +475,19 @@ function Step({ step: t, messageId }: { step: ToolTrace; messageId: string }) {
             t.name === "run_command" && <div className="text-[12px] text-fg-3">这一步没有保存输出（旧版本的记录）</div>
           )}
         </div>
+      </details>
+    );
+  }
+
+  // Several questions answered together: the answers fold open.
+  if (t.name === "ask_user" && t.questions?.length && t.answer) {
+    return (
+      <details className="group/s">
+        <summary className={clsx(row, "cursor-pointer list-none select-none")}>
+          {head}
+          <ChevronDown size={14} className="shrink-0 transition-transform group-open/s:rotate-180" />
+        </summary>
+        <div className="mt-1.5 whitespace-pre-wrap rounded-xl bg-active p-2.5 text-[13px] leading-relaxed text-fg-2">{t.answer}</div>
       </details>
     );
   }

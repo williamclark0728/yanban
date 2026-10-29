@@ -12,7 +12,7 @@ import { FILE_RULES, fileTools, filesText } from "./outputs";
 import { factsLine, HONEST_RULES, verifyReply } from "./verify";
 import { skillRules, skillTools } from "./skills";
 import { workRules, workTools } from "./workmode";
-import { AGENT_RULES, askTool, guard, PLAN_RULES, readOnly, todoTool, usePlanMode } from "./agentTools";
+import { agentRules, askTool, guard, PLAN_RULES, readOnly, todoTool, usePlanMode } from "./agentTools";
 import { requeueSteers, takeSteers } from "./inbox";
 import { NEXT_RULES, splitNext, useCompare, withoutAlternatives } from "./compare";
 import { MEMORY_RULES, memoryLines, memoryTools } from "./memory";
@@ -85,14 +85,20 @@ export function groupSystem(agent: Agent, group: Group) {
   ].join("\n");
 }
 
-export function planSystem(lead: Agent, group: Group, members: Agent[]) {
+/** The lead's plan prompt. `ask`: it may ask the user first when key details are missing. */
+export function planSystem(lead: Agent, group: Group, members: Agent[], ask = false) {
   return [
     groupSystem(lead, group),
     "",
     "你是这个群的主持人。用户的需求交给你处理，可分派的成员：",
     ...members.map((m) => `- ${m.name}：${m.role.duty}`),
     "",
-    "判断怎么处理用户的最新消息，三选一：",
+    `判断怎么处理用户的最新消息，${ask ? "四选一" : "三选一"}：`,
+    ...(ask
+      ? [
+          "0. 要花工夫的新任务（写报告、调研、做 PPT 或表格、写代码），但关键细节用户没说（范围、篇幅、格式、用途和读者、时间范围、语言风格等），猜错就得返工：先不分工，mode 写 ask，在 questions 里一次问完（最多 4 个，每个给 2–4 个选项，用户也能自己写；可以多选的加 \"multi\": true），reply 用一句话说明先问清再开工。要求已经清楚、或用户说了“直接做”时不要问。",
+        ]
+      : []),
     "1. 需要实际工作（写作、调研、分析、核查等）：拆成具体任务派给合适的成员，可以只派给部分成员，每人一条。",
     "   每条任务标明类型：produce 表示产出（写稿、调研、分析、写代码），review 表示审查别人的产出（核对事实和数字、检查逻辑措辞）。",
     "   需要准确性的成果，至少安排一名 produce 和一名 review；审查成员不产出，会在产出完成后检查并提出疑点，作者据此修订。",
@@ -104,9 +110,12 @@ export function planSystem(lead: Agent, group: Group, members: Agent[]) {
     "成员可以用 make_file 把 Word、Excel、PPT 文件直接附在群聊消息里给用户下载，不要说群聊发不了文件。",
     "",
     "只输出一个 JSON 对象，不要输出其他内容。格式：",
-    '{"reply": "你作为主持人自己说的话", "mode": "work 或 speak 或 answer", "assignments": [{"member": "成员名", "type": "produce 或 review", "task": "具体任务", "after": "要等的成员名，没有就省略"}]}',
+    ask
+      ? '{"reply": "你作为主持人自己说的话", "mode": "ask 或 work 或 speak 或 answer", "questions": [{"question": "问题", "options": ["选项一", "选项二"]}], "assignments": [{"member": "成员名", "type": "produce 或 review", "task": "具体任务", "after": "要等的成员名，没有就省略"}]}'
+      : '{"reply": "你作为主持人自己说的话", "mode": "work 或 speak 或 answer", "assignments": [{"member": "成员名", "type": "produce 或 review", "task": "具体任务", "after": "要等的成员名，没有就省略"}]}',
     "- reply 是你自己的发言，不要照抄或复述用户的消息。分工时是一两句回应（比如说明怎么安排）；不分工时是给用户的完整回答。",
     "- 不分工时 assignments 为空数组。",
+    ...(ask ? ["- 不提问时省略 questions；提问时 assignments 为空数组。"] : []),
     ...(group.guide ? ["", `本群的工作流程（需要实际工作时照这个分工）：\n${group.guide}`] : []),
     "",
     `示例（用户：大家好，自我介绍一下）：`,
@@ -225,6 +234,8 @@ export async function speak(opts: {
   suggest?: boolean;
   /** One of several models answering the same question side by side: the set's id and this model. */
   compare?: { id: string; model: ModelRef };
+  /** A member working inside a group run: the lead already asked the user, so no ask_user. */
+  noAsk?: boolean;
 }): Promise<Spoken> {
   const { providers, defaultModel, addMessage, patchMessage } = useData.getState();
   const id = uid();
@@ -250,10 +261,13 @@ export async function speak(opts: {
 
   const { report, halt, settle, missed } = tracer(id);
   const web = webAccess(agent, report);
+  // Desktop: agents with web access can also read pages in the built-in browser (loaded only there).
+  const browser = isDesktop && agent.web ? await import("./browserTools") : null;
   const all: ToolSet = {
     ...web.tools,
+    ...browser?.browserTools(agent, report),
     ...todoTool(id),
-    ...askTool(report),
+    ...(opts.noAsk ? {} : askTool(report)),
     ...memoryTools(report, agent, id),
     ...libraryTools(report),
     ...docTools(opts.chat, report),
@@ -305,7 +319,7 @@ export async function speak(opts: {
     const r = await streamReply({
       provider: target.provider,
       modelId: target.modelId,
-      system: [opts.system, FILE_RULES, skillRules(), work, jobRules(agent), AGENT_RULES, HONEST_RULES, MEMORY_RULES, libraryRules(), scheduleRules(opts.chat), docRules(opts.chat), opts.plan && PLAN_RULES, opts.suggest && usePrefs.getState().suggest && NEXT_RULES]
+      system: [opts.system, FILE_RULES, skillRules(), work, jobRules(agent), browser?.BROWSER_RULES, agentRules(!opts.noAsk), HONEST_RULES, MEMORY_RULES, libraryRules(), scheduleRules(opts.chat), docRules(opts.chat), opts.plan && PLAN_RULES, opts.suggest && usePrefs.getState().suggest && NEXT_RULES]
         .filter(Boolean)
         .join("\n\n"),
       messages: opts.messages,
@@ -427,6 +441,13 @@ const plainText = (m: ModelMessage) =>
   typeof m.content === "string" ? m.content : m.content.map((p) => (p.type === "text" ? p.text : p.type === "image" ? "x".repeat(3000) : "")).join("");
 
 /** Roughly how full the next request would be: system prompt, recent messages, tool definitions. */
+/** One line of the context panel: a part of every request and its rough size. */
+export interface ContextPart {
+  key: "history" | "summary" | "role" | "rules" | "tools" | "skills" | "memory";
+  label: string;
+  tokens: number;
+}
+
 export function contextUse(chat: string) {
   const who = speaker(chat);
   const { messages, providers, defaultModel } = useData.getState();
@@ -435,7 +456,21 @@ export function contextUse(chat: string) {
   const { agent, group } = who;
   const { summary, rest } = sinceSummary(messages.filter((m) => m.chat === chat));
   const history = group ? transcript(chat, agent.params.history) : privateHistory(messages, chat, agent.params.history).map(plainText).join("\n");
-  const system = [group ? groupSystem(agent, group) : systemPrompt(agent), FILE_RULES, skillRules(), !group && summary?.text].filter(Boolean).join("\n");
+  const system = group ? groupSystem(agent, group) : systemPrompt(agent);
+  // What each part of a request adds, the way the context panel lists it.
+  const memory = estimateTokens(memoryLines(agent).join("\n"));
+  const plan = webPlan(agent);
+  const web = estimateTokens(plan ? (plan === "tools" ? WEB_RULES : NATIVE_WEB_RULES) : agent.web ? NO_WEB_RULES : "");
+  const rules = [FILE_RULES, jobRules(agent), agentRules(), HONEST_RULES, MEMORY_RULES, libraryRules(), scheduleRules(chat), docRules(chat)].filter(Boolean).join("\n");
+  const parts: ContextPart[] = [
+    { key: "history", label: group ? "群聊记录" : "对话记录", tokens: estimateTokens(history) },
+    { key: "summary", label: "之前的摘要", tokens: !group && summary?.text ? estimateTokens(summary.text) : 0 },
+    { key: "role", label: "角色设定", tokens: Math.max(0, estimateTokens(system) - memory - web) },
+    { key: "rules", label: "使用规则", tokens: estimateTokens(rules) + web },
+    { key: "tools", label: "工具说明（估算）", tokens: TOOL_OVERHEAD },
+    { key: "skills", label: "技能", tokens: estimateTokens(skillRules()) },
+    { key: "memory", label: "记忆", tokens: memory },
+  ];
   // Every member of a group reads the same transcript, so the member whose model reads the least sets the limit.
   let tightest = { name: agent.name, modelId: target.modelId, window: contextWindow(target.modelId) };
   for (const id of group?.memberIds ?? []) {
@@ -444,7 +479,8 @@ export function contextUse(chat: string) {
     if (t && contextWindow(t.modelId) < tightest.window) tightest = { name: member.name, modelId: t.modelId, window: contextWindow(t.modelId) };
   }
   return {
-    used: estimateTokens(system + history) + TOOL_OVERHEAD,
+    used: parts.reduce((n, p) => n + p.tokens, 0),
+    parts,
     window: tightest.window,
     model: tightest.modelId,
     /** In a group: the member whose model has the smallest window. */

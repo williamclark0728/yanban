@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { ChevronDown, ChevronLeft, ChevronUp, ClipboardList, Clock, CornerDownRight, FileUp, Info, Lightbulb, NotebookPen, PanelRight, Pencil, PlugZap, Quote, X } from "lucide-react";
+import { AppWindow, ChevronDown, ChevronLeft, ChevronUp, ClipboardList, Clock, CornerDownRight, FileUp, Info, Lightbulb, NotebookPen, PanelRight, Pencil, PlugZap, Quote, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { setPlanMode, usePlanMode } from "../lib/agentTools";
 import { compact, newTopic, stop, useBusy } from "../lib/chat";
@@ -21,6 +21,7 @@ import { DEMO_IDS } from "../lib/seed";
 import { ModelChip } from "./ModelChip";
 import { TaskBoard } from "./TaskBoard";
 import { IconButton } from "./ui";
+import { toggleDock } from "../lib/dock";
 import { useShallow } from "zustand/react/shallow";
 
 const senderOf = (m?: Message) => (m && (m.kind === "text" || m.kind === "review") ? m.sender : undefined);
@@ -80,7 +81,7 @@ function PlanChip({ chat }: { chat: string }) {
       )}
     >
       <ClipboardList size={14} />
-      计划
+      <span className={clsx(!on && "@max-[34rem]:hidden")}>计划</span>
     </button>
   );
 }
@@ -295,6 +296,11 @@ export function ChatView() {
           {agent && dev && target && <span className="truncate font-mono text-xs text-fg-3">{target.modelId}</span>}
         </button>
         <div className="pointer-events-auto flex">
+          {isDesktop && (
+            <IconButton aria-label="工具区" title="工具区：终端、浏览器、文件、后台任务（Ctrl + `）" onClick={toggleDock}>
+              <AppWindow size={18} />
+            </IconButton>
+          )}
           <IconButton aria-label="共写文档" title="共写文档（/doc）" onClick={() => openDoc(chatId)}>
             <NotebookPen size={18} />
           </IconButton>
@@ -398,7 +404,7 @@ export function ChatView() {
             {inserted.map((q) => (
               <span key={q.id} className="flex max-w-full items-center gap-1.5 rounded-full border border-accent/40 bg-accent-soft py-1 pl-2.5 pr-1.5 text-[12.5px] text-accent-text">
                 <CornerDownRight size={12} className="shrink-0" />
-                <span className="truncate">插入中，下一步送达：{q.text || `${q.attachments?.length ?? 0} 个附件`}</span>
+                <span className="truncate">插话，这一步做完就送达：{q.text || `${q.attachments?.length ?? 0} 个附件`}</span>
                 <button type="button" aria-label="撤回这条" onClick={() => unsteer(chatId, q.id)} className="shrink-0 opacity-70 hover:opacity-100">
                   <X size={13} />
                 </button>

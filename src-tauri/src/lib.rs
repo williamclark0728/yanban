@@ -1,6 +1,8 @@
+mod browser;
 mod files;
 mod jobs;
 mod mcp;
+mod term;
 mod workspace;
 
 use tauri::Manager;
@@ -22,6 +24,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(mcp::Servers::default())
         .manage(jobs::Jobs::default())
+        .manage(term::Terms::default())
         .invoke_handler(tauri::generate_handler![
             workspace::ws_list,
             workspace::ws_read,
@@ -47,6 +50,18 @@ pub fn run() {
             jobs::job_output,
             jobs::job_stop,
             jobs::job_list,
+            jobs::job_forget,
+            browser::web_open,
+            browser::web_place,
+            browser::web_navigate,
+            browser::web_go,
+            browser::web_close,
+            browser::web_eval,
+            browser::web_reset,
+            term::term_open,
+            term::term_write,
+            term::term_resize,
+            term::term_close,
         ])
         .run(tauri::generate_context!())
         .expect("error while running 研伴");

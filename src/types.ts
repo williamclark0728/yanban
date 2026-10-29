@@ -144,6 +144,8 @@ export type TextMessage = Base & {
   plan?: boolean;
   /** What the user inserted (Enter) while this reply was running; the model read it before its next step. */
   steers?: string[];
+  /** Stopped because the user interjected (Enter while it ran); their message answers it next. */
+  interrupted?: boolean;
   /** Replies to the same question from several models, shown side by side; they share this id. */
   compare?: string;
   /** In a comparison: the model that wrote this one, and whether the user picked it to carry on. */
@@ -211,9 +213,16 @@ export interface Source {
   date?: string;
 }
 
+/** One question of a batch: suggested answers to click (several when `multi`), and the user may always write their own. */
+export interface AskItem {
+  text: string;
+  options: string[];
+  multi?: boolean;
+}
+
 export interface ToolTrace {
   id: string;
-  name: "web_search" | "read_page" | "dispatch_to_group" | "make_file" | "use_skill" | "install_skill" | "mcp" | "ask_user" | "remember" | "search_chats" | "search_library" | "delegate" | "schedule_task" | "edit_doc" | LocalTool;
+  name: "web_search" | "read_page" | "browser_open" | "browser_read" | "dispatch_to_group" | "make_file" | "use_skill" | "install_skill" | "mcp" | "ask_user" | "remember" | "search_chats" | "search_library" | "delegate" | "schedule_task" | "edit_doc" | LocalTool;
   /** One line for the UI, e.g. the search query or the group name. */
   label: string;
   /** "waiting": a local action waits for the user's approval. */
@@ -234,6 +243,8 @@ export interface ToolTrace {
   groupId?: string;
   /** ask_user: the question, its suggested answers, and what the user said. */
   question?: { text: string; options: string[] };
+  /** ask_user with several questions at once, answered together in one card. */
+  questions?: AskItem[];
   answer?: string;
   /** search_library: the passages found, with where each came from. */
   passages?: { title: string; text: string }[];

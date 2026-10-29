@@ -41,6 +41,13 @@ export async function refreshJobs() {
   }
 }
 
+/** Drops finished jobs from the list; running ones stay. */
+export async function forgetJobs(ids: string[]) {
+  if (!ids.length) return;
+  await call("job_forget", { ids });
+  await refreshJobs();
+}
+
 export const readJob = (id: string, since?: number, tail?: number) => call<Output>("job_output", { id, since, tail });
 export const stopJob = async (id: string) => {
   await call("job_stop", { id });

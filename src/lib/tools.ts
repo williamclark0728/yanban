@@ -3,6 +3,7 @@ import { jsonSchema, tool, type ToolSet } from "ai";
 import { resolveModel, useData } from "../store";
 import type { Agent, Source, ToolTrace } from "../types";
 import { describeError, KIMI_SEARCH, nativeSearch, type NativeSearch } from "./llm";
+import { isDesktop } from "./desktop";
 import { canSearch, readPage, searchWeb } from "./search";
 
 /** Adds or updates one tool step on the message being written. */
@@ -52,6 +53,8 @@ export const WEB_RULES = [
   "需要最新信息、具体数据、新闻或你不确定的事实时，先搜索再回答；常识问题不用搜。",
   "引用搜索结果时，在句末用 [编号] 标注来源，编号沿用搜索结果里的编号。",
   "用户要最近、最新的信息时，优先用发布日期近的结果，并写出日期；结果没有日期或已经比较旧时要说明。",
+  "X（推特）、小红书、Instagram、Facebook、Threads 要登录才能看，read_page 读不到；Reddit 常拦截自动访问。这些平台只能用搜索结果里出现的标题、链接和摘要，并注明“只看到搜索摘要，没打开原文”；搜索结果里没有的帖子就说没找到，请用户自己登录查看。",
+  "只列搜索结果或读过的页面里真实出现过的网址；不要按格式拼出帖子编号、视频编号或链接，也不要编造发布日期、点赞数、播放量。",
 ].join("\n");
 
 export const NATIVE_WEB_RULES = [
@@ -91,9 +94,41 @@ export function webAccess(agent: Agent, report: Report): { tools: ToolSet; searc
 
 const fail = (e: unknown) => describeError(e).message;
 
+/** Sites that show nothing without signing in; reading them only wastes time and tokens. */
+const LOGIN_SITES: [RegExp, string][] = [
+  [/(^|\.)(x|twitter)\.com$/, "X（推特）"],
+  [/(^|\.)(xiaohongshu\.com|xhslink\.com)$/, "小红书"],
+  [/(^|\.)instagram\.com$/, "Instagram"],
+  [/(^|\.)facebook\.com$/, "Facebook"],
+  [/(^|\.)threads\.(net|com)$/, "Threads"],
+];
+
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return "";
+  }
+};
+
+/** What the model hears when a site can't be read, so it stops trying and says so. */
+const unreadable = (site: string) =>
+  isDesktop
+    ? `${site} 的网页 read_page 读不到（要登录或会拦截自动访问），换这个网站的其他网址也一样。改用 browser_open 在内置浏览器里打开：用户在内置浏览器登录过就能读；读到登录页时请用户先在右侧浏览器里登录。没有 browser_open 时，只用搜索结果里的标题、链接和摘要，并注明“只看到搜索摘要，没打开原文”。`
+    : `${site} 的网页要登录或会拦截自动访问，研伴读不到正文，换这个网站的其他网址也一样，不要再试。只用搜索结果里出现过的标题、链接和摘要（注明“只看到搜索摘要，没打开原文”），不要补写摘要里没有的内容；告诉用户这个平台的帖子需要他自己登录查看。`;
+
+/** A short page that is only a sign-in prompt or a block notice, not the content. */
+function walled(text: string) {
+  const body = text.replace(/^(Title|URL Source|Published Time|Markdown Content):.*$/gm, "").trim();
+  if (body.length > 1500) return false;
+  return /log ?in to (continue|see|view)|sign in to (continue|see|view)|you've been blocked|whoa there, pardner|access denied|verify you are (a )?human|登录后查看|请先登录|登录后才能|安全验证|访问受限/i.test(body);
+}
+
 /** web_search and read_page. Result numbers keep counting across searches within one reply. */
 export function webTools(report: Report): ToolSet {
   let next = 1;
+  // Sites that already failed in this reply: another page of the same site fails the same way.
+  const failed = new Map<string, number>();
   return {
     web_search: tool({
       description: "搜索网页，返回带编号的结果（标题、网站、日期、链接、摘要）。",
@@ -129,14 +164,30 @@ export function webTools(report: Report): ToolSet {
       }),
       execute: async ({ url }, { toolCallId, abortSignal }) => {
         const base = { id: toolCallId, name: "read_page" as const, label: url };
+        const host = hostOf(url);
+        const login = LOGIN_SITES.find(([re]) => re.test(host))?.[1];
+        if (login) {
+          report({ ...base, status: "error", detail: "要登录才能看，读不到" });
+          return unreadable(login);
+        }
+        if ((failed.get(host) ?? 0) >= 2) {
+          report({ ...base, status: "error", detail: "这个网站前两次都没读到，不再尝试" });
+          return unreadable(host);
+        }
         report({ ...base, status: "running" });
+        const miss = (detail: string) => {
+          const n = (failed.get(host) ?? 0) + 1;
+          failed.set(host, n);
+          report({ ...base, status: "error", detail });
+          return n >= 2 ? unreadable(host) : `读取失败：${detail}`;
+        };
         try {
           const text = await readPage(useData.getState().search, url, abortSignal);
+          if (walled(text)) return miss("页面要求登录或拦截了访问");
           report({ ...base, status: "done", detail: `${text.length} 字` });
           return text;
         } catch (e) {
-          report({ ...base, status: "error", detail: fail(e) });
-          return `读取失败：${fail(e)}`;
+          return miss(fail(e));
         }
       },
     }),

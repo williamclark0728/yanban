@@ -119,7 +119,7 @@ export function Row({ title, desc, children }: { title: string; desc?: string; c
 }
 
 function General() {
-  const { mode, setMode, theme, setTheme, name, setName, approval, setApproval, fontSize, steps, zoom, suggest, chatWidth, confirmLinks, set } = usePrefs();
+  const { mode, setMode, theme, setTheme, name, setName, approval, setApproval, fontSize, steps, zoom, suggest, chatWidth, confirmLinks, fold, clarify, set } = usePrefs();
   const setHelp = useUi((s) => s.setHelp);
   const { agents, groups, restoreExamples } = useData(useShallow((s) => ({ agents: s.agents, groups: s.groups, restoreExamples: s.restoreExamples })));
   const [restoring, setRestoring] = useState(false);
@@ -217,6 +217,21 @@ function General() {
       </Row>
       <Row title="回答后的建议" desc={suggest ? "私聊回答下方给出两三个接下来可以做的事，点一下就发出" : "不显示"}>
         <Switch checked={suggest} onChange={(v) => set({ suggest: v })} label="回答后的建议" />
+      </Row>
+      <Row title="长回答折叠" desc={fold === "off" ? "回答总是完整显示" : "超过这个高度的回答先折叠，点「展开全文」再看；私聊里最新一条不折叠"}>
+        <Segmented
+          value={fold}
+          onChange={(fold) => set({ fold })}
+          options={[
+            { value: "off", label: "不折叠" },
+            { value: "short", label: "短" },
+            { value: "medium", label: "中" },
+            { value: "long", label: "长" },
+          ]}
+        />
+      </Row>
+      <Row title="开工前先问清楚" desc={clarify ? "交代一件要花工夫的事、关键细节没说时，先用选择题问你几个问题再动手" : "不主动提问，按自己的理解直接做"}>
+        <Switch checked={clarify} onChange={(v) => set({ clarify: v })} label="开工前先问清楚" />
       </Row>
       <Row title="打开链接前确认" desc={confirmLinks ? "点来源或网址时先显示完整地址，确认后在浏览器打开" : "点了直接在浏览器打开"}>
         <Switch checked={confirmLinks} onChange={(v) => set({ confirmLinks: v })} label="打开链接前确认" />

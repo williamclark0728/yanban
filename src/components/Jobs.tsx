@@ -8,8 +8,8 @@ const since = (ms: number) => {
   return s < 60 ? `${s} 秒` : s < 3600 ? `${Math.floor(s / 60)} 分钟` : `${Math.floor(s / 3600)} 小时 ${Math.floor((s % 3600) / 60)} 分`;
 };
 
-/** One background job: status, its latest output while open, and a stop button. */
-function JobRow({ job, onHide }: { job: JobInfo; onHide: () => void }) {
+/** One background job: status, its latest output while open, and a stop button. `where` also names its folder. */
+export function JobRow({ job, onHide, where }: { job: JobInfo; onHide: () => void; where?: boolean }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const box = useRef<HTMLPreElement>(null);
@@ -47,6 +47,7 @@ function JobRow({ job, onHide }: { job: JobInfo; onHide: () => void }) {
           <ChevronDown size={13} className={clsx("shrink-0 text-fg-3 transition-transform", open && "rotate-180")} />
         </button>
         <span className="shrink-0 text-[12px] text-fg-3">
+          {where && `${job.root.split(/[\\/]/).filter(Boolean).at(-1)} · `}
           {job.done ? `已结束 · 退出码 ${job.code ?? "—"}` : `已运行 ${since(job.started)}`}
         </span>
         {job.done ? (

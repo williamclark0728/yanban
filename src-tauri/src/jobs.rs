@@ -166,3 +166,9 @@ pub fn job_list(jobs: State<'_, Jobs>) -> Vec<JobInfo> {
     list.sort_by_key(|j| j.started);
     list
 }
+
+/// Drops finished jobs from the list (running ones are kept).
+#[tauri::command]
+pub fn job_forget(jobs: State<'_, Jobs>, ids: Vec<String>) {
+    jobs.0.lock().unwrap().retain(|id, job| !ids.contains(id) || !job.lock().unwrap().done);
+}

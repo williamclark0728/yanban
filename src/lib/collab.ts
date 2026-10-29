@@ -1,6 +1,6 @@
 import { jsonSchema, tool, type ModelMessage, type ToolSet } from "ai";
-import { resolveModel, useData } from "../store";
-import type { Agent, Attachment, Baseline, BoardItem, Group, Issue, IssueStatus, Message, Run, RunRound, RunStep, TextMessage } from "../types";
+import { resolveModel, useData, usePrefs } from "../store";
+import type { Agent, AskItem, Attachment, Baseline, BoardItem, Group, Issue, IssueStatus, Message, Run, RunRound, RunStep, TextMessage } from "../types";
 import {
   agentById,
   autoCompact,
@@ -21,6 +21,7 @@ import {
   userContent,
   withFiles,
 } from "./chat";
+import { cleanQuestions, waitAnswer } from "./agentTools";
 import { completeText, describeError, repairJson, showWait } from "./llm";
 import { tracer, webAccess, type Report } from "./tools";
 import { verifyReply } from "./verify";
@@ -86,7 +87,7 @@ const OF_WORK = /稿|产出|答案|解答|结果|报告|文章|内容|步骤|推
  * and a producer whose task names another producer ("根据检索员甲的资料写稿") waits for them.
  * Producers are put in an order where everyone comes after those they wait for; a wait that would close a loop is dropped.
  */
-export function parsePlan(raw: string, members: Agent[]): { reply: string; speak: boolean; assignments: Assignment[] } | null {
+export function parsePlan(raw: string, members: Agent[]): { reply: string; speak: boolean; assignments: Assignment[]; questions: AskItem[] } | null {
   const data = extractJson(raw);
   if (!data) return null;
   const byName = (name: string) =>
@@ -140,7 +141,7 @@ export function parsePlan(raw: string, members: Agent[]): { reply: string; speak
     const after = a.type === "produce" ? waitsFor.get(a.agent.id)!.filter((m) => ordered.slice(0, i).some((x) => x.agent === m)) : [];
     return after.length ? { ...a, after } : a;
   });
-  return { reply: typeof data.reply === "string" ? data.reply.trim() : "", speak, assignments };
+  return { reply: typeof data.reply === "string" ? data.reply.trim() : "", speak, assignments, questions: assignments.length ? [] : cleanQuestions(data.questions) };
 }
 
 export function issueStatus(value: unknown): IssueStatus {
@@ -286,7 +287,14 @@ export interface CollabResult {
  * Members named with @ answer directly; otherwise (or when the lead is named) the lead runs a collaboration.
  * `via` marks a task a lead brought over from a private chat; it always goes to the lead.
  */
-export async function sendToGroup(groupId: string, text: string, attachments?: Attachment[], via?: string): Promise<CollabResult | null> {
+/** The task each group is working on, for an interjection to carry over. */
+const tasks = new Map<string, string>();
+export const runningTask = (groupId: string) => tasks.get(groupId);
+
+/**
+ * `before`: the user interjected while this task ran; the lead re-plans from it instead of starting over.
+ */
+export async function sendToGroup(groupId: string, text: string, attachments?: Attachment[], via?: string, before?: string): Promise<CollabResult | null> {
   const { groups, addMessage } = useData.getState();
   const group = groups.find((g) => g.id === groupId);
   if (!group) return null;
@@ -311,7 +319,8 @@ export async function sendToGroup(groupId: string, text: string, attachments?: A
     return null;
   }
   const task = text || `处理附件：${attachments?.map((f) => f.name).join("、") ?? ""}`;
-  return collaborate(group, lead, members.filter((m) => m.id !== lead.id), task, messageId);
+  // A task brought over from a private chat was already clarified there; the user is watching that chat, not this one.
+  return collaborate(group, lead, members.filter((m) => m.id !== lead.id), task, messageId, !via && !before, before);
 }
 
 // ---------- a private-chat lead handing work to its group ----------
@@ -401,9 +410,13 @@ async function answerMentions(group: Group, named: Agent[]) {
  * 3. Reviewers return structured points; the group's consensus rule decides pass or revise.
  * 4. Repeat until pass or the round limit, then the lead delivers.
  */
-async function collaborate(group: Group, lead: Agent, members: Agent[], task: string, sinceId: string): Promise<CollabResult> {
+async function collaborate(group: Group, lead: Agent, members: Agent[], task: string, sinceId: string, canAsk: boolean, before?: string): Promise<CollabResult> {
   const c = begin(group.id);
   if (!c) return { status: "busy", text: "" };
+  const said = task;
+  // An interjection: members work from the old task with the user's change on top.
+  if (before) task = `${before}\n\n用户中途插话修改：${said}`;
+  tasks.set(group.id, task);
   let delivered = "";
   const { saveRun, addMessage, patchMessage } = useData.getState();
   const signal = c.signal;
@@ -442,13 +455,38 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
   const prompt = (instruction: string, limit = lead.params.history) => groupPrompt(group.id, limit, instruction, sinceId);
 
   const body = async () => {
-    // 1. Plan
-    const plan = await think({ chat: group.id, agent: lead, system: planSystem(lead, group, members), messages: prompt("请处理用户的最新消息。"), signal, temperature: Math.min(lead.params.temperature, 0.5) });
+    // 1. Plan. With "ask first" on, the lead may ask the user once before assigning anything.
+    const temperature = Math.min(lead.params.temperature, 0.5);
+    const first = before
+      ? `用户在上一个任务进行中插话，改了方向；上一个任务已经停下，完成的部分在群聊记录里（标着“被你插话打断”的是没做完的）。\n上一个任务：「${before}」\n用户的插话：「${said}」\n按插话后的要求重新安排：插话是补充或修改细节时，沿着原任务继续，已有的产出能用就接着用，不要从头重做；插话换了一件事时，按新要求处理。`
+      : "请处理用户的最新消息。";
+    let plan = await think({ chat: group.id, agent: lead, system: planSystem(lead, group, members, canAsk && usePrefs.getState().clarify), messages: prompt(first), signal, temperature });
     if (!plan.ok) {
       run.status = signal.aborted ? "stopped" : "failed";
       return;
     }
-    const parsed = parsePlan(plan.text, members);
+    let parsed = parsePlan(plan.text, members);
+    if (parsed?.questions.length) {
+      const qs = parsed.questions;
+      const step = { id: uid(), name: "ask_user" as const, label: qs.length > 1 ? `${qs.length} 个问题` : qs[0].text, questions: qs };
+      patchMessage(plan.messageId, { text: parsed.reply || "开工前先问你几个问题：", status: undefined, usage: plan.usage, tools: [{ ...step, status: "waiting" }] }, true);
+      const answer = await waitAnswer(step.id, signal);
+      patchMessage(plan.messageId, { tools: [answer === null ? { ...step, status: "error", detail: "已停止" } : { ...step, status: "done", answer }] }, true);
+      if (answer === null) {
+        run.status = "stopped";
+        return;
+      }
+      // Everyone works from the request with the answers added.
+      task = `${task}\n\n${lead.name}问过的补充信息：\n${answer}`;
+      run.task = task;
+      tasks.set(group.id, task);
+      plan = await think({ chat: group.id, agent: lead, system: planSystem(lead, group, members), messages: prompt(`请处理用户的最新消息。你已经问过用户，回答如下，不要再提问，直接安排：\n${answer}`), signal, temperature });
+      if (!plan.ok) {
+        run.status = signal.aborted ? "stopped" : "failed";
+        return;
+      }
+      parsed = parsePlan(plan.text, members);
+    }
     let assignments = parsed?.assignments ?? [];
     const intro = parsed ? parsed.reply : stripThink(plan.text);
     if (assignments.length === 0 && echoes(intro, task)) {
@@ -530,7 +568,7 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
               r === 1
                 ? `${lead.name}分配给你的任务：${a.task}\n用户的原始需求：「${task}」\n${a.after ? `${names(a.after)}的产出已在群聊记录里，在它的基础上完成你的任务。\n` : ""}产出要逐项满足原始需求里的每个要求，直接给出完整产出。不要加入材料和原文里没有的事实、结论或程度词。`
                 : `第 ${r - 1} 轮审查意见（[需修改] 必须修改，[存疑] 请补充依据或说明）：\n${feedback}\n\n请在你上一版的基础上修订，输出完整的新版本；最后加一段「修订说明」，逐条说明每个疑点改了什么或为什么不改。`;
-            const out = await speak({ chat: group.id, agent: a.agent, system: groupSystem(a.agent, group), messages: prompt(instruction), signal });
+            const out = await speak({ chat: group.id, agent: a.agent, system: groupSystem(a.agent, group), messages: prompt(instruction), signal, noAsk: true });
             round.steps.push({ agentId: a.agent.id, type: r === 1 ? "draft" : "revise", summary: summarize(out.text) || "未完成", tokens: out.tokens, failed: !out.ok, messageId: out.messageId });
             mark(a.agent.id, "produce", out.ok ? "done" : "failed");
             return out;
@@ -606,7 +644,7 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
         ? `审查已通过。请把最终成果交付给用户：先给出完整成品（以作者最新一版为准，不要改动已核实的内容，保留其中按用户要求列出的内容），再用几句话说明各成员的结论和修订经过。\n用户的原始需求：「${task}」\n${FACTS_FIRST}`
         : `已到最多轮数，审查仍未全部通过。请交付作者最新一版的完整成品，并如实列出仍未解决的疑点：\n${unresolved}\n用户的原始需求：「${task}」\n${FACTS_FIRST}`;
     mark(lead.id, "summary", "working");
-    const final = await speak({ chat: group.id, agent: lead, system: groupSystem(lead, group), messages: prompt(instruction, lead.params.history), signal });
+    const final = await speak({ chat: group.id, agent: lead, system: groupSystem(lead, group), messages: prompt(instruction, lead.params.history), signal, noAsk: true });
     mark(lead.id, "summary", final.ok ? "done" : "failed");
     run.rounds[run.rounds.length - 1].steps.push({ agentId: lead.id, type: "summary", summary: summarize(final.text) || "未完成", tokens: final.tokens, failed: !final.ok, messageId: final.messageId });
     delivered = final.text;
@@ -626,6 +664,7 @@ async function collaborate(group: Group, lead: Agent, members: Agent[], task: st
     if (lastRound && !lastRound.verdict && run.status !== "done") lastRound.verdict = "stop";
     run.endedAt = Date.now();
     save();
+    tasks.delete(group.id);
     end(group.id);
   }
   return { status: run.status, text: delivered, note: run.rounds.at(-1)?.note };

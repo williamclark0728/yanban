@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { useEffect, useSyncExternalStore } from "react";
+import { lazy, Suspense, useEffect, useSyncExternalStore } from "react";
 import { ChatView } from "./components/ChatView";
 import { DetailPanel } from "./components/DetailPanel";
 import { DocPanel } from "./components/DocPanel";
@@ -14,9 +14,13 @@ import { UpdateCard } from "./components/UpdateCard";
 import { Welcome } from "./components/Welcome";
 import { isDesktop, setZoom } from "./lib/desktop";
 import { refreshJobs } from "./lib/jobs";
+import { toggleDock } from "./lib/dock";
 import { startScheduler } from "./lib/schedule";
 import { CHAT_WIDTH_MAX, stepZoom, useData, usePrefs, useUi } from "./store";
 import { useShallow } from "zustand/react/shallow";
+
+// Only the desktop app has the tool dock (terminal, browser, files, jobs); the website never loads it.
+const Dock = lazy(() => import("./components/Dock"));
 
 function useMedia(query: string) {
   return useSyncExternalStore(
@@ -88,9 +92,32 @@ function useZoom() {
   }, []);
 }
 
+/** The open chat's workspace folder, where a new terminal starts. */
+function activeWorkspace() {
+  const { active } = useUi.getState();
+  const { agents, groups } = useData.getState();
+  if (!active) return undefined;
+  return agents.find((a) => a.id === active.id)?.workspace ?? groups.find((g) => g.id === active.id)?.workspace;
+}
+
+/** Desktop: Ctrl + ` shows or hides the tool dock. */
+function useTerminalKey() {
+  useEffect(() => {
+    if (!isDesktop) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.key !== "`") return;
+      e.preventDefault();
+      toggleDock();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+}
+
 export default function App() {
   useTheme();
   useZoom();
+  useTerminalKey();
   const { active, panelOpen, togglePanel, aside, closeAside, pane, closePane } = useUi();
   const { loaded, load } = useData(useShallow((s) => ({ loaded: s.loaded, load: s.load })));
   const wide = useMedia("(min-width: 1280px)");
@@ -134,11 +161,16 @@ export default function App() {
       </div>
       {side && wide && <div className="h-full w-[min(480px,40vw)] min-w-[380px] shrink-0 border-l border-line">{side}</div>}
       {side && !wide && (
-        <div className="fixed inset-0 z-40 flex justify-end bg-[var(--scrim)]" onClick={closeSide}>
+        <div data-overlay className="fixed inset-0 z-40 flex justify-end bg-[var(--scrim)]" onClick={closeSide}>
           <div className="rise h-full w-full sm:w-[440px] sm:border-l sm:border-line" onClick={(e) => e.stopPropagation()}>
             {side}
           </div>
         </div>
+      )}
+      {isDesktop && (
+        <Suspense fallback={null}>
+          <Dock cwd={activeWorkspace()} />
+        </Suspense>
       )}
       <SettingsDialog />
       <Shortcuts />

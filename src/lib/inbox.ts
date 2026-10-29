@@ -1,7 +1,8 @@
 // Messages the user sent while a reply was running. Two kinds:
 // - queued (Ctrl+Enter): wait and go out, in order, once the chat is free; they can be edited, removed and reordered;
-// - inserted (Enter, private chats): handed to the running reply before its next step. If the reply ends
-//   without another step, they go out right after it, ahead of the queue.
+// - inserted (Enter): an interjection. In a private chat it reaches the running reply before its next step;
+//   a reply that is only writing text is stopped so it goes out at once (queue.ts). In a group the run stops
+//   and the message goes out first, with the task it interrupted (`before`).
 // Sending lives in queue.ts; this module has no dependency on the chat code, so chat.ts can use it.
 import { create } from "zustand";
 import type { Attachment } from "../types";
@@ -11,6 +12,8 @@ export interface Queued {
   id: string;
   text: string;
   attachments?: Attachment[];
+  /** A group interjection: the task that was running when the user changed course. */
+  before?: string;
 }
 
 export const useQueue = create<Record<string, Queued[]>>(() => ({}));

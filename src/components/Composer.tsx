@@ -392,7 +392,8 @@ export function Composer({
             ))}
           </div>
         )}
-        <div className="flex items-end gap-1.5">
+        {/* When the column is narrow (the dock open), the text box takes the first line and the buttons go below it. */}
+        <div className="@container flex flex-wrap items-end gap-1.5">
           <button
             type="button"
             aria-label="添加附件"
@@ -453,7 +454,7 @@ export function Composer({
                 submit(e.ctrlKey || e.metaKey);
               }
             }}
-            className="max-h-[200px] min-h-9 flex-1 resize-none bg-transparent py-[7px] leading-[22px] outline-none placeholder:text-fg-3"
+            className="max-h-[200px] min-h-9 flex-1 resize-none @max-[34rem]:order-first @max-[34rem]:basis-full bg-transparent py-[7px] leading-[22px] outline-none placeholder:text-fg-3"
           />
           {trailing}
           {busy && (
@@ -481,8 +482,8 @@ export function Composer({
           {(!busy || (canQueue && hasContent)) && (
             <button
               type="button"
-              aria-label={busy ? "插入" : "发送"}
-              title={busy ? "插入（Enter）：正在回复的智能体下一步就能看到；群聊里会排队" : undefined}
+              aria-label={busy ? "插话" : "发送"}
+              title={busy ? "插话（Enter）：马上打断，按这条消息调整方向；正在进行的搜索或命令会先做完这一步" : undefined}
               onClick={() => submit()}
               disabled={!canSend}
               className={clsx(

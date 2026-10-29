@@ -1,7 +1,7 @@
 import clsx from "clsx";
 import { Brain, ChevronDown, Loader2 } from "lucide-react";
 import { useState } from "react";
-import { compact, contextUse, useBusy } from "../lib/chat";
+import { compact, contextUse, useBusy, type ContextPart } from "../lib/chat";
 import { AUTO_COMPACT, fmtTokens } from "../lib/context";
 import { useData, useUi } from "../store";
 import type { Agent, Effort } from "../types";
@@ -23,6 +23,8 @@ export function ContextMeter({ chat }: { chat: string }) {
   const tone = ratio >= AUTO_COMPACT ? "text-bad" : ratio >= 0.5 ? "text-warn" : "text-fg-3";
   const r = 7;
   const c = 2 * Math.PI * r;
+  const shown = use.parts.filter((p) => p.tokens > 0);
+  const room = Math.max(0, Math.round(use.window * AUTO_COMPACT) - use.used);
 
   const run = async () => {
     setWorking(true);
@@ -48,14 +50,35 @@ export function ContextMeter({ chat }: { chat: string }) {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="rise absolute bottom-full right-0 z-20 mb-3 w-72 rounded-2xl border border-line bg-raise p-4 text-sm shadow-[var(--shadow)]">
-            <div className="font-medium">上下文</div>
-            <div className="mt-1 text-[13px] text-fg-2">
-              约 {fmtTokens(use.used)} / {fmtTokens(use.window)} tokens（{(ratio * 100).toFixed(1)}%）
+          <div className="rise absolute bottom-full right-0 z-20 mb-3 w-80 rounded-2xl border border-line bg-raise p-4 text-sm shadow-[var(--shadow)]">
+            <div className="flex items-baseline justify-between">
+              <span className="font-medium">上下文 · 已用 {percent(ratio)}</span>
+              <span className="text-[12.5px] tabular-nums text-fg-3">
+                {fmtTokens(use.used)} / {fmtTokens(use.window)}
+              </span>
             </div>
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-raise-2">
-              <div className={clsx("h-full rounded-full", ratio >= AUTO_COMPACT ? "bg-bad" : ratio >= 0.5 ? "bg-warn" : "bg-accent")} style={{ width: `${ratio * 100}%` }} />
+            <div className="relative mt-2 flex h-2 overflow-hidden rounded-full bg-raise-2">
+              {shown.map((p) => (
+                <div key={p.key} title={p.label} style={{ width: `${(p.tokens / use.window) * 100}%`, background: COLORS[p.key] }} />
+              ))}
+              <div className="absolute inset-y-0 w-px bg-fg-3" style={{ left: `${AUTO_COMPACT * 100}%` }} title="超过这里会自动压缩" />
             </div>
+            <ul className="mt-3 space-y-1 text-[13px]">
+              {shown.map((p) => (
+                <li key={p.key} className="flex items-center gap-2">
+                  <span className="size-2.5 shrink-0 rounded-[3px]" style={{ background: COLORS[p.key] }} />
+                  <span className="min-w-0 flex-1 truncate text-fg-2">{p.label}</span>
+                  <span className="w-14 text-right tabular-nums">{fmtTokens(p.tokens)}</span>
+                  <span className="w-12 text-right tabular-nums text-fg-3">{share(p.tokens / use.window)}</span>
+                </li>
+              ))}
+              <li className="flex items-center gap-2">
+                <span className="size-2.5 shrink-0 rounded-[3px] bg-raise-2" />
+                <span className="min-w-0 flex-1 truncate text-fg-2">压缩前还能用</span>
+                <span className="w-14 text-right tabular-nums">{fmtTokens(room)}</span>
+                <span className="w-12 text-right tabular-nums text-fg-3">{share(room / use.window)}</span>
+              </li>
+            </ul>
             <p className="mt-3 text-[12.5px] leading-relaxed text-fg-3">
               {use.member ? `群里窗口最小的是${use.member}（${use.model}），按它的 ${fmtTokens(use.window)} 估算，` : `${use.model} 的窗口按 ${fmtTokens(use.window)} 估算，`}包括设定、最近的消息、附件和工具说明。超过 {AUTO_COMPACT * 100}% 时，发下一条消息前会自动压缩：把之前的对话写成摘要，之后只带摘要。
             </p>
@@ -74,6 +97,19 @@ export function ContextMeter({ chat }: { chat: string }) {
     </div>
   );
 }
+
+const COLORS: Record<ContextPart["key"], string> = {
+  history: "#4c8dff",
+  summary: "#7aa7ff",
+  role: "#f08a3c",
+  rules: "#1fb39a",
+  tools: "#9b7cf0",
+  skills: "#e0679b",
+  memory: "#d4a72c",
+};
+
+/** One line's share of the window: one decimal, and "<0.1%" rather than 0. */
+const share = (ratio: number) => (ratio > 0 && ratio < 0.001 ? "<0.1%" : `${(ratio * 100).toFixed(1)}%`);
 
 /** Small shares keep one decimal, so a chat that has started never reads 0%. */
 const percent = (ratio: number) => {

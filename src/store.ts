@@ -35,12 +35,20 @@ interface Prefs {
   chatWidth: number;
   /** Ask before a link opens in the browser, showing the full address. */
   confirmLinks: boolean;
+  /** Replies taller than this fold until clicked; "off" never folds. */
+  fold: Fold;
+  /** Before a new, sizeable task with key details missing, the agent asks first (ask_user, or the lead's questions). */
+  clarify: boolean;
   setMode: (mode: Prefs["mode"]) => void;
   setTheme: (theme: Theme) => void;
   setName: (name: string) => void;
   setApproval: (approval: Approval) => void;
-  set: (patch: Partial<Pick<Prefs, "fontSize" | "steps" | "zoom" | "autoMemory" | "suggest" | "chatWidth" | "confirmLinks">>) => void;
+  set: (patch: Partial<Pick<Prefs, "fontSize" | "steps" | "zoom" | "autoMemory" | "suggest" | "chatWidth" | "confirmLinks" | "fold" | "clarify">>) => void;
 }
+
+export type Fold = "off" | "short" | "medium" | "long";
+/** Height in pixels above which a reply folds. */
+export const FOLD_HEIGHT: Record<Exclude<Fold, "off">, number> = { short: 360, medium: 640, long: 1000 };
 
 export const CHAT_WIDTH_MIN = 640;
 export const CHAT_WIDTH_MAX = 1600;
@@ -70,6 +78,8 @@ export const usePrefs = create<Prefs>()(
       suggest: true,
       chatWidth: 820,
       confirmLinks: true,
+      fold: "medium",
+      clarify: true,
       setMode: (mode) => set({ mode }),
       setTheme: (theme) => set({ theme }),
       setName: (name) => set({ name: name.slice(0, 20) }),

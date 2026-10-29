@@ -116,6 +116,8 @@ createServer(async (req, res) => {
   if (system.includes("<next>") && /建议/.test(last)) reply += "\n\n<next>生成 PPT|整理成对比表|派到群里写正式稿</next>";
   // A reply that claims a file it never made, for the claim check under replies.
   if (/假装生成/.test(last)) reply = 'Excel 文件已生成并存入工作区：信用表_20261028.xlsx（12,598 字节），已在 Excel 中成功打开。报告.md 也已保存。\n\n<生成的文件 文件名="信用表_20261028" format="xlsx"> {} </生成的文件>';
+  // 0.7.6: "长回答" gets a reply long enough to fold.
+  if (/长回答/.test(last)) reply = Array.from({ length: 40 }, (_, i) => `第 ${i + 1} 段：这是一段很长的回答，用来检查长回答折叠。`).join("\n\n");
   // 0.6.0: a sub-agent, the goal check, and translating English reasoning.
   // 0.7.0: the smart-approval reviewer (anything that deletes is sent to the user) and rewriting a passage.
   if (system.includes("你是安全审查员")) {
@@ -148,7 +150,19 @@ createServer(async (req, res) => {
     const members = [...system.matchAll(/^- (.+?)：/gm)].map((m) => m[1]);
     const latest = [...last.matchAll(/【用户】([^\n]*)/g)].at(-1)?.[1] ?? "";
     // "自我介绍" → everyone speaks; "先搜集" → a two-step chain (the second producer waits for the first) plus a reviewer.
-    reply = /你好|hi/i.test(latest)
+    // 0.7.6: "问清楚" makes the lead ask first, when the app allows it and hasn't asked yet.
+    reply = /问清楚/.test(latest) && system.includes("mode 写 ask") && !last.includes("你已经问过用户")
+      ? JSON.stringify({
+          reply: "开工前先确认几件事。",
+          mode: "ask",
+          questions: [
+            { question: "报告写多长？", options: ["1000 字以内", "3000 字左右", "不限"] },
+            { question: "要覆盖哪些平台？", options: ["YouTube", "B站", "知乎"], multi: true },
+            { question: "交付格式？", options: ["Word", "Markdown"] },
+          ],
+          assignments: [],
+        })
+      : /你好|hi/i.test(latest)
       ? JSON.stringify({ reply: "你好！有任务直接说。", mode: "answer", assignments: [] })
       : /自我介绍/.test(latest)
       ? JSON.stringify({ reply: "请大家介绍一下自己。", mode: "speak", assignments: members.map((m) => ({ member: m, type: "produce", task: "两三句话介绍自己" })) })
@@ -194,6 +208,15 @@ createServer(async (req, res) => {
   if (/列步骤/.test(last) && tools.includes("update_todos") && toolCalls < 3) {
     const todos = ["读需求", "查资料", "写结论"].map((text, i) => ({ text, status: i < toolCalls ? "done" : i === toolCalls ? "in_progress" : "pending" }));
     call = { name: "update_todos", arguments: { todos } };
+  } else if (/问清楚/.test(last) && tools.includes("ask_user") && lastMsg?.role !== "tool") {
+    call = { name: "ask_user", arguments: { questions: [{ question: "报告写多长？", options: ["1000 字以内", "3000 字左右"] }, { question: "要哪些平台？", options: ["YouTube", "B站", "知乎"], multi: true }] } };
+  } else if (lastMsg?.role === "tool" && /问清楚/.test(last)) {
+    reply = `收到：${String(lastMsg.content)}`;
+  } else if (/内置浏览器/.test(last) && tools.includes("browser_open") && lastMsg?.role !== "tool") {
+    // 0.7.6: "内置浏览器" opens example.com in the built-in browser and reads it.
+    call = { name: "browser_open", arguments: { url: "https://example.com" } };
+  } else if (lastMsg?.role === "tool" && /内置浏览器/.test(last)) {
+    reply = `浏览器读到：${String(lastMsg.content).slice(0, 160)}`;
   } else if (/问我/.test(last) && tools.includes("ask_user") && lastMsg?.role !== "tool") {
     call = { name: "ask_user", arguments: { question: "报告要用中文还是英文？", options: ["中文", "英文", "中英双语"] } };
   } else if (/重复搜索/.test(last) && tools.includes("web_search") && toolCalls < 4) {

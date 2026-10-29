@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import { AlertCircle, AlertTriangle, Archive, BookPlus, Brain, Hourglass, Check, CheckCircle2, ChevronDown, Circle, CircleDot, Copy, CornerDownRight, ExternalLink, FileDown, FilePen, FolderOpen, Languages, ListTodo, NotebookPen, Loader2, MessageSquarePlus, Play, RotateCcw, RotateCw, Sparkles, Square, Undo2 } from "lucide-react";
-import { memo, useRef, useState, type ReactNode } from "react";
+import { memo, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
@@ -18,7 +18,7 @@ import { send } from "../lib/queue";
 import { undoAll } from "../lib/workmode";
 import { download, replyAsDocx } from "../lib/outputs";
 import { clock } from "../lib/time";
-import { useData, usePrefs, useUi } from "../store";
+import { FOLD_HEIGHT, useData, usePrefs, useUi } from "../store";
 import type { Agent, Issue, Message, Todo, ToolTrace, Unverified, Usage, Verdict } from "../types";
 import { BotAvatar, palette } from "./Avatar";
 import { FileCard, FileIcon, kindOf } from "./FileCard";
@@ -580,6 +580,55 @@ function Summary({ msg, agents }: { msg: Extract<Message, { kind: "text" }>; age
   );
 }
 
+// Replies the user unfolded, kept outside the bubbles so scrolling them out of the window and back keeps them open.
+const unfolded = new Set<string>();
+
+/** A message taller than the user's fold height shows its start and a button for the rest. */
+function Fold({ id, chars, active, children }: { id: string; chars: number; active: boolean; children: ReactNode }) {
+  const fold = usePrefs((s) => s.fold);
+  const limit = fold === "off" || !active ? 0 : FOLD_HEIGHT[fold];
+  const box = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  const [tall, setTall] = useState(false);
+  const [open, setOpen] = useState(() => unfolded.has(id));
+  useLayoutEffect(() => {
+    const el = body.current;
+    if (!el || !limit) return setTall(false);
+    // A little over the limit isn't worth a click.
+    const measure = () => setTall(el.offsetHeight > limit * 1.25);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [limit]);
+  const folded = tall && !open;
+  const toggle = () => {
+    if (open) {
+      unfolded.delete(id);
+      setOpen(false);
+      // The button moves up with the folded text; keep it in view.
+      requestAnimationFrame(() => box.current?.scrollIntoView({ block: "nearest" }));
+    } else {
+      unfolded.add(id);
+      setOpen(true);
+    }
+  };
+  const fade = "linear-gradient(to bottom, #000 75%, transparent)";
+  return (
+    <>
+      <div ref={box} className={clsx(folded && "overflow-hidden")} style={folded ? { maxHeight: limit, maskImage: fade, WebkitMaskImage: fade } : undefined}>
+        <div ref={body}>{children}</div>
+      </div>
+      {tall && (
+        <button type="button" onClick={toggle} className="mt-1 flex items-center gap-1 text-[13px] font-medium text-accent-text hover:underline">
+          <ChevronDown size={14} className={clsx("transition-transform", open && "rotate-180")} />
+          {open ? "收起" : `展开全文（共 ${chars.toLocaleString()} 字）`}
+        </button>
+      )}
+    </>
+  );
+}
+
 // The last message of each chat, worked out once per change of the message list instead of once per bubble.
 const lastIds = new WeakMap<Message[], Map<string, string>>();
 function lastIdOf(messages: Message[], chat: string) {
@@ -654,7 +703,9 @@ function MessageBubble({
             msg.attachments?.map((f, i) => <FileCard key={f.id ?? i} file={f} />)}
           {msg.text && (
             <div className="rounded-[20px] bg-bubble-me px-4 py-2.5">
-              <RichText text={msg.text} agents={agents} />
+              <Fold id={msg.id} chars={msg.text.length} active>
+                <RichText text={msg.text} agents={agents} />
+              </Fold>
             </div>
           )}
           <Meta time={time} align="right" copy={msg.text || undefined} />
@@ -695,7 +746,11 @@ function MessageBubble({
                 </div>
               ))}
             {tools && <ToolSteps steps={tools} messageId={msg.id} />}
-            {msg.text && <RichText text={msg.text} agents={agents} cites={citations(tools)} />}
+            {msg.text && (
+              <Fold id={msg.id} chars={msg.text.length} active={!streaming && !column && (inGroup || !isLatest)}>
+                <RichText text={msg.text} agents={agents} cites={citations(tools)} />
+              </Fold>
+            )}
             {streaming && <Waiting id={msg.id} typing={!msg.text && !reasoning} />}
             {msg.text && !streaming && <CitedSources text={msg.text} steps={tools} />}
             {msg.kind === "review" && (
@@ -716,7 +771,7 @@ function MessageBubble({
           <Meta
             time={time}
             usage={msg.usage}
-            note={stopped ? "已停止" : undefined}
+            note={stopped ? (msg.kind === "text" && msg.interrupted ? "被你插话打断" : "已停止") : undefined}
             copy={msg.text || undefined}
             name={msg.kind === "text" ? (agent?.name ?? "回复") : undefined}
             align="left"
