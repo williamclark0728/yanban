@@ -16,7 +16,8 @@ import { isDesktop, setZoom } from "./lib/desktop";
 import { refreshJobs } from "./lib/jobs";
 import { toggleDock } from "./lib/dock";
 import { startScheduler } from "./lib/schedule";
-import { CHAT_WIDTH_MAX, stepZoom, useData, usePrefs, useUi } from "./store";
+import { Resizer } from "./components/Resizer";
+import { CHAT_WIDTH_MAX, stepZoom, useData, usePrefs, useUi, WIDTHS } from "./store";
 import { useShallow } from "zustand/react/shallow";
 
 // Only the desktop app has the tool dock (terminal, browser, files, jobs); the website never loads it.
@@ -50,6 +51,11 @@ function useTheme() {
   useEffect(() => {
     document.documentElement.style.setProperty("--chat-w", width >= CHAT_WIDTH_MAX ? "100%" : `${width}px`);
   }, [width]);
+  // The side columns the user can drag wider or narrower.
+  const sidebar = usePrefs((s) => s.sidebarWidth);
+  useEffect(() => {
+    document.documentElement.style.setProperty("--sidebar-w", `${sidebar}px`);
+  }, [sidebar]);
 }
 
 /**
@@ -121,6 +127,8 @@ export default function App() {
   const { active, panelOpen, togglePanel, aside, closeAside, pane, closePane } = useUi();
   const { loaded, load } = useData(useShallow((s) => ({ loaded: s.loaded, load: s.load })));
   const wide = useMedia("(min-width: 1280px)");
+  const sideWidth = usePrefs((s) => s.sideWidth);
+  const setPrefs = usePrefs((s) => s.set);
 
   useEffect(() => {
     void load();
@@ -159,7 +167,12 @@ export default function App() {
       <div className={clsx("h-full min-w-0 flex-1 md:flex", active ? "flex" : "hidden")}>
         <ChatView />
       </div>
-      {side && wide && <div className="h-full w-[min(480px,40vw)] min-w-[380px] shrink-0 border-l border-line">{side}</div>}
+      {side && wide && (
+        <div className="relative h-full shrink-0 border-l border-line" style={{ width: sideWidth }}>
+          <Resizer side="left" width={() => usePrefs.getState().sideWidth} min={340} max={() => window.innerWidth - usePrefs.getState().sidebarWidth - 420} onChange={(w) => setPrefs({ sideWidth: w })} onReset={() => setPrefs({ sideWidth: WIDTHS.side })} />
+          {side}
+        </div>
+      )}
       {side && !wide && (
         <div data-overlay className="fixed inset-0 z-40 flex justify-end bg-[var(--scrim)]" onClick={closeSide}>
           <div className="rise h-full w-full sm:w-[440px] sm:border-l sm:border-line" onClick={(e) => e.stopPropagation()}>

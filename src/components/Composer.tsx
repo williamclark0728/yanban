@@ -454,7 +454,7 @@ export function Composer({
                 submit(e.ctrlKey || e.metaKey);
               }
             }}
-            className="max-h-[200px] min-h-9 flex-1 resize-none @max-[34rem]:order-first @max-[34rem]:basis-full bg-transparent py-[7px] leading-[22px] outline-none placeholder:text-fg-3"
+            className="max-h-[200px] min-h-9 flex-1 resize-none @max-[40rem]:order-first @max-[40rem]:basis-full bg-transparent py-[7px] leading-[22px] outline-none placeholder:text-fg-3"
           />
           {trailing}
           {busy && (

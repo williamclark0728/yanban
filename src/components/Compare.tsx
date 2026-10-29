@@ -42,7 +42,7 @@ export function CompareChip({ agent }: { agent: Agent }) {
       >
         <Columns3 size={14} />
         {/* Narrow column (the dock open): icon only, unless comparing. */}
-        <span className={clsx(!on && "@max-[34rem]:hidden")}>{on ? `对比 ${picked.length}` : "对比"}</span>
+        <span className={clsx(!on && "@max-[40rem]:hidden")}>{on ? `对比 ${picked.length}` : "对比"}</span>
       </button>
       {open && (
         <>

@@ -81,7 +81,7 @@ function PlanChip({ chat }: { chat: string }) {
       )}
     >
       <ClipboardList size={14} />
-      <span className={clsx(!on && "@max-[34rem]:hidden")}>计划</span>
+      <span className={clsx(!on && "@max-[40rem]:hidden")}>计划</span>
     </button>
   );
 }

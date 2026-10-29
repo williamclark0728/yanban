@@ -3,7 +3,8 @@ import { Bot, CircleHelp, LayoutTemplate, Plus, Quote, Search, Settings, Users, 
 import { memo, useMemo, useState, type ReactNode } from "react";
 import { searchMessages, type Hit } from "../lib/memory";
 import { listTime } from "../lib/time";
-import { useData, usePrefs, useUi } from "../store";
+import { useData, usePrefs, useUi, WIDTHS } from "../store";
+import { Resizer } from "./Resizer";
 import type { Agent, ChatRef, Group, Message } from "../types";
 import { BotAvatar, GroupAvatar, MeAvatar } from "./Avatar";
 import { IconButton } from "./ui";
@@ -34,7 +35,15 @@ export function Sidebar() {
   const hits = useMemo(() => (q ? searchMessages(q, 40) : []), [q, messages]);
 
   return (
-    <aside className="flex h-full w-full flex-col bg-sidebar md:w-[300px] md:shrink-0 md:border-r md:border-line">
+    <aside className="relative flex h-full w-full flex-col bg-sidebar md:w-[var(--sidebar-w)] md:shrink-0 md:border-r md:border-line">
+      <Resizer
+        side="right"
+        width={() => usePrefs.getState().sidebarWidth}
+        min={220}
+        max={() => Math.min(520, window.innerWidth - 480)}
+        onChange={(w) => usePrefs.getState().set({ sidebarWidth: w })}
+        onReset={() => usePrefs.getState().set({ sidebarWidth: WIDTHS.sidebar })}
+      />
       <header className="flex h-16 items-center gap-1 px-4">
         {searching ? (
           <div className="flex h-9 flex-1 items-center gap-2 rounded-full bg-raise-2 px-3">

@@ -39,16 +39,23 @@ interface Prefs {
   fold: Fold;
   /** Before a new, sizeable task with key details missing, the agent asks first (ask_user, or the lead's questions). */
   clarify: boolean;
+  /** Widths the user dragged: the chat list on the left, the details / file panel, and the desktop tool dock. */
+  sidebarWidth: number;
+  sideWidth: number;
+  dockWidth: number;
   setMode: (mode: Prefs["mode"]) => void;
   setTheme: (theme: Theme) => void;
   setName: (name: string) => void;
   setApproval: (approval: Approval) => void;
-  set: (patch: Partial<Pick<Prefs, "fontSize" | "steps" | "zoom" | "autoMemory" | "suggest" | "chatWidth" | "confirmLinks" | "fold" | "clarify">>) => void;
+  set: (patch: Partial<Pick<Prefs, "fontSize" | "steps" | "zoom" | "autoMemory" | "suggest" | "chatWidth" | "confirmLinks" | "fold" | "clarify" | "sidebarWidth" | "sideWidth" | "dockWidth">>) => void;
 }
 
 export type Fold = "off" | "short" | "medium" | "long";
 /** Height in pixels above which a reply folds. */
 export const FOLD_HEIGHT: Record<Exclude<Fold, "off">, number> = { short: 360, medium: 640, long: 1000 };
+
+/** Default widths of the side columns, which the user can drag. */
+export const WIDTHS = { sidebar: 300, side: 480, dock: 560 };
 
 export const CHAT_WIDTH_MIN = 640;
 export const CHAT_WIDTH_MAX = 1600;
@@ -80,6 +87,9 @@ export const usePrefs = create<Prefs>()(
       confirmLinks: true,
       fold: "medium",
       clarify: true,
+      sidebarWidth: WIDTHS.sidebar,
+      sideWidth: WIDTHS.side,
+      dockWidth: WIDTHS.dock,
       setMode: (mode) => set({ mode }),
       setTheme: (theme) => set({ theme }),
       setName: (name) => set({ name: name.slice(0, 20) }),

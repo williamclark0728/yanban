@@ -3,6 +3,8 @@ import { FolderTree, Globe, ListChecks, TerminalSquare, X } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { resetBrowser } from "../lib/browser";
 import { useDock, type DockView } from "../lib/dock";
+import { usePrefs, WIDTHS } from "../store";
+import { Resizer } from "./Resizer";
 import { useJobs } from "../lib/jobs";
 import { BrowserView } from "./BrowserView";
 import { FilesView } from "./FilesView";
@@ -25,8 +27,17 @@ export default function Dock({ cwd }: { cwd?: string }) {
   const { open, view } = useDock();
   const running = useJobs((s) => s.filter((j) => !j.done).length);
   useEffect(resetBrowser, []);
+  const width = usePrefs((s) => s.dockWidth);
   return (
-    <div className={clsx("h-full w-[min(560px,44vw)] min-w-[360px] shrink-0 flex-col border-l border-line bg-panel", open ? "flex" : "hidden")}>
+    <div className={clsx("relative h-full max-w-[75vw] shrink-0 flex-col border-l border-line bg-panel", open ? "flex" : "hidden")} style={{ width }}>
+      <Resizer
+        side="left"
+        width={() => usePrefs.getState().dockWidth}
+        min={340}
+        max={() => window.innerWidth - usePrefs.getState().sidebarWidth - 420}
+        onChange={(w) => usePrefs.getState().set({ dockWidth: w })}
+        onReset={() => usePrefs.getState().set({ dockWidth: WIDTHS.dock })}
+      />
       <div className="flex h-12 shrink-0 items-center gap-1 border-b border-line px-2">
         <div className="flex min-w-0 flex-1 gap-0.5">
           {VIEWS.map((v) => (

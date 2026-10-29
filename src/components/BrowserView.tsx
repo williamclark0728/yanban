@@ -4,12 +4,14 @@ import { closeTab, createView, go, history, newTab, place, useBrowser } from "..
 import { useLink } from "../lib/links";
 import { usePrefs, useUi } from "../store";
 import { DockEmpty, DockTabs } from "./DockTabs";
+import { useResizing } from "./Resizer";
 import { IconButton } from "./ui";
 
 /** Something drawn over the dock (a dialog, the side panel on a narrow window) would be hidden under the native browser view, so the view steps aside. */
 function covered() {
   const ui = useUi.getState();
-  return ui.settingsOpen || !!ui.editor || ui.helpOpen || !!useLink.getState().url || !!document.querySelector('[role="dialog"], [data-overlay]');
+  // While a divider is dragged the view would swallow the mouse; it comes back at the new size.
+  return useResizing.getState() || ui.settingsOpen || !!ui.editor || ui.helpOpen || !!useLink.getState().url || !!document.querySelector('[role="dialog"], [data-overlay]');
 }
 
 /** The dock's browser: tabs, an address bar, and the page itself (a native view laid over the box below). */
