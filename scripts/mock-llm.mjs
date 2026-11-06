@@ -3,7 +3,7 @@
 import { createServer } from "node:http";
 
 const PORT = 5199;
-const models = ["mock-chat", "mock-think", "mock-strict"];
+const models = ["mock-chat", "mock-think", "mock-strict", "mock-fixed"];
 const cors = {
   "access-control-allow-origin": "*",
   "access-control-allow-headers": "*",
@@ -105,6 +105,12 @@ createServer(async (req, res) => {
     stats.open++;
     stats.peak = Math.max(stats.peak, stats.open);
     res.on("close", () => stats.open--);
+  }
+  // mock-fixed acts like kimi-k3 behind LiteLLM: temperature 1 and nothing else. GET /stats counts the refusals.
+  if (payload.model === "mock-fixed" && payload.temperature !== undefined && payload.temperature !== 1) {
+    stats.turnedAway++;
+    res.writeHead(400, { ...cors, "content-type": "application/json" });
+    return res.end(JSON.stringify({ error: { message: "litellm.BadRequestError: OpenAIException - invalid temperature: only 1 is allowed for this model\nLiteLLM: model group 'mock-fixed' failed with the error above. No fallback was attempted.", type: "None", code: "400" } }));
   }
   let reply =
     `我是${me}（${payload.model}）。收到：「${last.slice(-60)}」。\n\n` +

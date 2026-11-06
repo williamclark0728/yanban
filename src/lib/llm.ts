@@ -98,6 +98,36 @@ function editingFetch(base: typeof fetch, edits: ((body: Body) => void)[]): type
   };
 }
 
+// "invalid temperature: only 1 is allowed" (Kimi), "'temperature' does not support 0.2 … Only the default (1) value is supported" (OpenAI).
+const FIXED_SAMPLING = /\b(temperature|top_p)\b.{0,80}?\bonly\b[^\d.]{0,20}(\d+(?:\.\d+)?)/is;
+// What models turned down this session insisted on; later requests send it straight away.
+const fixedSampling = new Map<string, Body>();
+
+/**
+ * Some models allow one value for a sampling setting and say which when they refuse a request. Sends that value
+ * instead, so the temperature slider and the app's own low-temperature steps (summaries, reviews) don't break them.
+ */
+function samplingFetch(base: typeof fetch, key: string): typeof fetch {
+  return async (input, init) => {
+    if (typeof init?.body !== "string") return base(input, init);
+    const body = JSON.parse(init.body);
+    const fixed = fixedSampling.get(key) ?? {};
+    for (const name of Object.keys(fixed)) if (name in body) body[name] = fixed[name];
+    // Each setting can be corrected once: two corrections at most, then the error goes to the user.
+    for (let tries = 0; ; tries++) {
+      const res = await base(input, { ...init, body: JSON.stringify(body) });
+      if (res.status !== 400 || tries === 2) return res;
+      const m = FIXED_SAMPLING.exec(bodyMessage(await res.clone().text()));
+      if (!m) return res;
+      const name = m[1].toLowerCase();
+      const value = Number(m[2]);
+      if (!(name in body) || body[name] === value) return res;
+      body[name] = value;
+      fixedSampling.set(key, { ...fixedSampling.get(key), [name]: value });
+    }
+  };
+}
+
 /** Turns on the service's own search in the request body (Gemini's goes in as a tool instead). */
 function searchEdit(kind: NativeSearch) {
   return (body: Body) => {
@@ -346,7 +376,7 @@ function pacedFetch(base: typeof fetch, p: Provider, onWait?: Wait): typeof fetc
 export function languageModel(p: Provider, modelId: string, search = false, effort: Effort = "auto", streaming = true, onWait?: Wait) {
   const kind = search ? nativeSearch(p, modelId) : null;
   const edits = [kind && kind !== "gemini" ? searchEdit(kind) : null, effortEdit(p, effort, streaming)].filter((e) => !!e);
-  const fetch = editingFetch(pacedFetch(fetchFor(p), p, onWait), edits);
+  const fetch = editingFetch(samplingFetch(pacedFetch(fetchFor(p), p, onWait), `${p.id}/${modelId}`), edits);
   const baseURL = absolute(trimSlash(p.baseUrl));
   const apiKey = p.apiKey || "none";
   switch (p.protocol) {
